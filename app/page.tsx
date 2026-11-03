@@ -1,69 +1,36 @@
-import Image from "next/image";
+"use client";
+
+import { useEffect, useMemo, useState } from "react";
+import { AlertTriangle, ArrowUpRight, Check, ChevronRight, CircleDollarSign, Clock3, Filter, LayoutDashboard, Moon, Play, RotateCcw, Search, Settings, ShieldCheck, Sparkles, Sun, Users, X } from "lucide-react";
+import VerdictStudio from "@/components/studio/VerdictStudio";
+
+type Dispute = { id: string; paypal_dispute_id: string; customer_name: string; amount: string; currency: string; reason: string; status: string; deadline: string; win_likelihood: number | null; confidence: number | null; decision: string | null; simulated: boolean; created_at: string };
+type Detail = Dispute & { assessment: { evidence_items: { type: string; present: boolean; strength: number; note: string }[]; conflicts: string[]; checklist_score: number; win_likelihood: number; confidence: number; recommended: string; rationale: string; packet_draft: string } | null; audit: { step: string; summary: string; simulated: boolean; ts: string }[] };
+
+const API = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+const TOKEN = process.env.NEXT_PUBLIC_API_TOKEN ?? "verdict-demo-token";
+const navItems = [{ label: "Dashboard", icon: LayoutDashboard }, { label: "Approvals", icon: ShieldCheck, count: 1 }, { label: "Simulator", icon: Play }, { label: "Settings", icon: Settings }];
+const pretty = (value: string | number | null | undefined) => value == null ? "Pending" : String(value).replaceAll("_", " ");
+const money = (value: string) => new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(Number(value));
+const countdown = (deadline: string) => { const hours = Math.max(0, Math.round((new Date(deadline).getTime() - Date.now()) / 36e5)); return hours > 24 ? `${Math.floor(hours / 24)}d ${hours % 24}h` : `${hours}h`; };
 
 export default function Home() {
-  return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert h-5 w-[100px]"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the{" "}
-            <code className="rounded bg-black/[.06] px-1.5 py-0.5 font-mono text-[0.9em] dark:bg-white/[.08]">
-              page.tsx
-            </code>{" "}
-            file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
-        </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert h-[14px] w-4"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={14}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
-      </main>
-    </div>
-  );
+  const [disputes, setDisputes] = useState<Dispute[]>([]), [selected, setSelected] = useState<Detail | null>(null), [filter, setFilter] = useState("ALL"), [search, setSearch] = useState(""), [notice, setNotice] = useState("Ready for a simulated case"), [dark, setDark] = useState(false);
+  async function load() { try { const response = await fetch(`${API}/disputes`, { headers: { Authorization: `Bearer ${TOKEN}` } }); if (!response.ok) throw new Error(); setDisputes((await response.json()).items); } catch { setNotice("Connect the API to load live disputes"); } }
+  async function runCase(caseName: string) { setNotice(`Running simulated Case ${caseName}...`); try { const response = await fetch(`${API}/sim/dispute?case=${caseName}`, { method: "POST", headers: { Authorization: `Bearer ${TOKEN}` } }); const data = await response.json(); await load(); setNotice(`Case ${caseName} complete · ${data.dispute_id}`); } catch { setNotice("Could not reach the simulated API"); } }
+  async function openDetail(id: string) { const response = await fetch(`${API}/disputes/${id}`, { headers: { Authorization: `Bearer ${TOKEN}` } }); if (response.ok) setSelected(await response.json()); }
+  useEffect(() => { void load(); const timer = setInterval(() => void load(), 5000); return () => clearInterval(timer); }, []);
+  const visible = useMemo(() => disputes.filter((item) => (filter === "ALL" || item.status === filter) && `${item.id} ${item.customer_name}`.toLowerCase().includes(search.toLowerCase())), [disputes, filter, search]);
+  const recovered = disputes.filter((item) => item.decision === "FIGHT").reduce((sum, item) => sum + Number(item.amount), 0);
+  return <div className={dark ? "theme-dark min-h-screen" : "min-h-screen"}>
+    <aside className="sidebar"><div className="brand"><div className="brand-mark">V</div><div><strong>Verdict</strong><span>Know which disputes to fight.</span></div></div><div className="mode-row"><span className="mode-pill amber"><span /> PAYPAL: MOCK</span><span className="mode-pill blue"><span /> LLM: MOCK</span></div><nav>{navItems.map(({ label, icon: Icon, count }) => <button className={label === "Dashboard" ? "nav-item active" : "nav-item"} key={label}><Icon size={17} /><span>{label}</span>{count && <b>{count}</b>}</button>)}</nav><div className="sidebar-note"><Sparkles size={16} /><div><strong>SIMULATED DATA</strong><span>Demo cases use realistic evidence without live PayPal calls.</span></div></div><div className="sidebar-bottom"><button className="icon-button" title="Toggle theme" onClick={() => setDark(!dark)}>{dark ? <Sun size={17} /> : <Moon size={17} />}</button><span>Demo merchant</span><div className="avatar">DM</div></div></aside>
+    <main className="main"><header className="topbar"><div><p className="eyebrow">DISPUTE OPERATIONS / OVERVIEW</p><h1>Command center</h1></div><div className="top-actions"><span className="live-dot"><span /> Live connected</span><button className="icon-button" title="Refresh disputes" onClick={() => void load()}><RotateCcw size={17} /></button></div></header>
+      <section className="impact"><div className="section-heading"><div><p className="eyebrow">IMPACT</p><h2>Modeled estimates</h2></div><span className="assumption">ⓘ Based on demo activity and stated assumptions</span></div><div className="impact-grid"><Metric label="Disputes handled" value={String(disputes.length)} icon={<Users size={17} />} /><Metric label="Auto-resolved" value={String(disputes.filter((x) => x.status === "REFUNDED" || x.status === "EVIDENCE_SUBMITTED").length)} icon={<Check size={17} />} /><Metric label="Revenue recovered" value={money(String(recovered))} icon={<CircleDollarSign size={17} />} accent /><Metric label="Hours saved" value={(disputes.length * 0.4).toFixed(1)} icon={<Clock3 size={17} />} /></div></section>
+      <section className="workspace"><div className="workspace-head"><div><p className="eyebrow">ALL DISPUTES</p><h2>Cases</h2></div><div className="sim-controls"><span className="sim-label">SIMULATOR</span>{["A", "B", "C"].map((item) => <button className="case-button" key={item} onClick={() => void runCase(item)}><Play size={13} fill="currentColor" /> Case {item}</button>)}</div></div><div className="toolbar"><div className="filters">{[["ALL", "All"], ["NEW", "New"], ["AWAITING_APPROVAL", "Needs approval"], ["EVIDENCE_SUBMITTED", "Submitted"], ["REFUNDED", "Refunded"]].map(([value, label]) => <button className={filter === value ? "filter active" : "filter"} key={value} onClick={() => setFilter(value)}>{label}</button>)}</div><label className="search"><Search size={16} /><input placeholder="Search cases" value={search} onChange={(event) => setSearch(event.target.value)} /><Filter size={15} /></label></div><div className="table-wrap"><table><thead><tr><th>Dispute</th><th>Customer</th><th>Amount</th><th>Reason</th><th>Deadline</th><th>Win likelihood</th><th>Decision</th><th>Status</th><th /></tr></thead><tbody>{visible.map((item) => <tr key={item.id} onClick={() => void openDetail(item.id)}><td><span className="case-id">{item.id}</span>{item.simulated && <span className="sim-tag">SIM</span>}</td><td><strong>{item.customer_name}</strong><small>{item.paypal_dispute_id}</small></td><td className="amount">{money(item.amount)}</td><td><span className="reason">{pretty(item.reason)}</span></td><td><span className={new Date(item.deadline).getTime() - Date.now() < 864e5 ? "deadline danger" : "deadline"}><Clock3 size={14} />{countdown(item.deadline)}</span></td><td><div className="likelihood"><div><span style={{ width: `${(item.win_likelihood ?? 0) * 100}%` }} /></div><b>{Math.round((item.win_likelihood ?? 0) * 100)}%</b></div></td><td><Badge value={item.decision} /></td><td><Status value={item.status} /></td><td><ChevronRight size={17} className="chevron" /></td></tr>)}</tbody></table>{visible.length === 0 && <div className="empty"><ShieldCheck size={28} /><strong>No disputes yet</strong><span>Run a simulated case to see Verdict think.</span></div>}</div></section><section className="studio-section"><div className="studio-section-head"><div><p className="eyebrow">AG STUDIO ANALYTICS</p><h2>Explore the dispute system</h2></div><span>View mode · three saved pages · simulated history</span></div><VerdictStudio openDispute={(id) => void openDetail(id)} /></section><p className="status-line"><span className="status-pulse" /> {notice}</p></main>
+    {selected && <div className="drawer-backdrop" onClick={() => setSelected(null)}><aside className="drawer" onClick={(event) => event.stopPropagation()}><button className="close-button" onClick={() => setSelected(null)}><X size={19} /></button><div className="drawer-head"><p className="eyebrow">{selected.id} <span className="sim-tag">SIMULATED</span></p><h2>{selected.customer_name}</h2><div className="drawer-meta"><strong>{money(selected.amount)}</strong><Status value={selected.status} /><span><Clock3 size={14} /> {countdown(selected.deadline)} remaining</span></div></div><div className="verdict-card"><div className="verdict-top"><div><p className="eyebrow">AGENT VERDICT</p><h3>{selected.decision === "REFUND" ? "Agent chose not to fight" : pretty(selected.decision)}</h3></div><Badge value={selected.decision} /></div><p>{selected.assessment?.rationale}</p><div className="meter-row"><span>Win likelihood</span><b>{Math.round((selected.assessment?.win_likelihood ?? 0) * 100)}%</b></div><div className="meter"><span style={{ width: `${(selected.assessment?.win_likelihood ?? 0) * 100}%` }} /></div><div className="confidence"><span>Confidence</span><b>{Math.round((selected.assessment?.confidence ?? 0) * 100)}%</b></div></div>{selected.assessment?.conflicts?.length ? <div className="conflict"><AlertTriangle size={17} /><div><strong>Conflict detected</strong><span>{selected.assessment.conflicts[0]}</span></div></div> : null}<div className="drawer-section"><div className="section-heading"><div><p className="eyebrow">EVIDENCE CHECKLIST</p><h3>Case assessment</h3></div><span className="score">{Math.round((selected.assessment?.checklist_score ?? 0) * 100)} / 100</span></div>{selected.assessment?.evidence_items.map((item) => <div className="evidence-row" key={item.type}><span className={item.present ? "evidence-icon present" : "evidence-icon"}>{item.present ? <Check size={13} /> : <X size={13} />}</span><div><strong>{pretty(item.type)}</strong><span>{item.note}</span></div><b>{item.present ? `${Math.round(item.strength * 100)}%` : "Missing"}</b></div>)}</div><div className="drawer-section"><p className="eyebrow">PIPELINE TIMELINE</p><div className="timeline">{selected.audit.map((entry) => <div className="timeline-row" key={`${entry.step}-${entry.ts}`}><span className="timeline-dot"><Check size={11} /></span><div><strong>{entry.step}</strong><span>{entry.summary}</span></div><time>{new Date(entry.ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</time></div>)}</div></div></aside></div>}
+  </div>;
 }
+
+function Metric({ label, value, icon, accent = false }: { label: string; value: string; icon: React.ReactNode; accent?: boolean }) { return <div className="metric"><div className={accent ? "metric-icon green" : "metric-icon"}>{icon}</div><span>{label}</span><strong className="tabular">{value}</strong><small>vs. last 30 days <ArrowUpRight size={12} /></small></div>; }
+function Badge({ value }: { value: string | number | null | undefined }) { const normalized = value == null ? "pending" : String(value).toLowerCase(); return <span className={`badge ${normalized}`}>{pretty(value)}</span>; }
+function Status({ value }: { value: string | number | null | undefined }) { const normalized = value == null ? "pending" : String(value).toLowerCase(); return <span className={`status-chip ${normalized}`}><span />{pretty(value)}</span>; }
