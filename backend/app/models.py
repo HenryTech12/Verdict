@@ -64,6 +64,7 @@ class Dispute(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
     simulated: Mapped[bool] = mapped_column(default=True)
     case: Mapped[str] = mapped_column(String(1), default="A")
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     __table_args__ = (UniqueConstraint("paypal_dispute_id"),)
 
 
@@ -110,4 +111,24 @@ class AuditLog(Base):
     input_json: Mapped[dict] = mapped_column(JSON, default=dict)
     output_json: Mapped[dict] = mapped_column(JSON, default=dict)
     simulated: Mapped[bool] = mapped_column(default=False)
+    duration_ms: Mapped[int] = mapped_column(default=0)
     ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+
+
+class WebhookEvent(Base):
+    __tablename__ = "webhook_events"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    event_id: Mapped[str] = mapped_column(String(100), unique=True)
+    event_type: Mapped[str] = mapped_column(String(100))
+    received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+
+
+class Action(Base):
+    __tablename__ = "actions"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    dispute_id: Mapped[str] = mapped_column(ForeignKey("disputes.id"))
+    action_type: Mapped[str] = mapped_column(String(40))
+    idempotency_key: Mapped[str] = mapped_column(String(160), unique=True)
+    result_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    simulated: Mapped[bool] = mapped_column(default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)

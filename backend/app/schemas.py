@@ -38,8 +38,32 @@ class DisputeListItem(BaseModel):
     deadline: datetime
     win_likelihood: float | None = None
     confidence: float | None = None
-    decision: DecisionName | None = None
+    decision: str | None = None
     simulated: bool
+    created_at: datetime
+
+
+class DisputeListResponse(BaseModel):
+    items: list[DisputeListItem]
+    total: int
+    page: int
+    page_size: int
+
+
+class SimulationResponse(BaseModel):
+    dispute_id: str
+    case: str
+    simulated: bool
+
+
+class ApprovalItem(BaseModel):
+    id: int
+    dispute_id: str
+    requested_action: str
+    recommendation_summary: str
+    amount: Decimal | None = None
+    deadline: datetime | None = None
+    status: str
     created_at: datetime
 
 

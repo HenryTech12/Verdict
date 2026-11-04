@@ -3,6 +3,7 @@ from decimal import Decimal
 from app.services.assessment import CaseEvidence, assess
 from app.services.guardrails import apply_guardrails
 from app.services.policy import choose_policy
+from app.config import settings
 
 
 def test_conflict_caps_win_likelihood():
@@ -23,3 +24,8 @@ def test_guardrails_downgrade_only():
     assert apply_guardrails("REFUND", Decimal("101"), False, 0.9, []) == ("ESCALATE", "REFUND_ABOVE_AUTO_REFUND_CAP")
     assert apply_guardrails("FIGHT", Decimal("80"), False, 0.9, ["mismatch"]) == ("ESCALATE", "CONFLICTING_EVIDENCE")
     assert apply_guardrails("FIGHT", Decimal("80"), True, 0.9, []) == ("EXPIRED", "DEADLINE_EXPIRED")
+
+
+def test_settings_schema_defaults_are_valid():
+    assert settings.auto_refund_cap > 0
+    assert settings.approval_threshold > settings.auto_refund_cap

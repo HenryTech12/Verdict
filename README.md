@@ -7,10 +7,12 @@ Verdict is a mock-first AI dispute operations console for small online merchants
 The demo works without paid keys. Use Python 3.11+ and Node.js 20+:
 
 ```bash
-cd backend && python -m pip install -e ".[test]" && cd ..
-make test
-python -m uvicorn backend.app.main:app --reload --port 8000
-# in another terminal
+cd backend
+python -m pip install -e ".[test]"
+python -m pytest -q
+python -m uvicorn app.main:app --reload --port 8000
+# in another terminal, from the repository root
+cd ..
 npm run dev
 ```
 
@@ -20,43 +22,9 @@ Open `http://localhost:3000`. The API docs are at `http://localhost:8000/docs`. 
 
 Copy `.env.example` to `.env`. For the offline demo, keep `PAYPAL_MODE=mock` and `LLM_PROVIDER=mock`; no PayPal credentials or LLM key are required. The frontend uses `NEXT_PUBLIC_API_URL`, `NEXT_PUBLIC_API_TOKEN`, and optionally `NEXT_PUBLIC_AG_STUDIO_LICENSE_KEY`.
 
-For the intended Groq setup, use `LLM_PROVIDER=groq`, set `GROQ_API_KEY`, and choose `LLM_MODEL` (for example `llama-3.3-70b-versatile`). The current deterministic mock assessment remains active because the Groq adapter and server-side AI proxy are not yet implemented in this repository; setting the variable alone does not make an external Groq call.
+For the intended Groq setup, use `LLM_PROVIDER=groq`, set `GROQ_API_KEY`, and choose `LLM_MODEL` (for example `llama-3.3-70b-versatile`). The provider boundary is implemented under `backend/app/llm`; the pipeline still defaults to the deterministic mock assessment until the orchestration wiring is enabled.
 
 PayPal sandbox credentials are only needed for a future real integration: `PAYPAL_MODE=sandbox`, `PAYPAL_CLIENT_ID`, `PAYPAL_CLIENT_SECRET`, `PAYPAL_WEBHOOK_ID`, and the fixed sandbox URL in `PAYPAL_BASE_URL`. Never use live PayPal credentials or a live base URL.
-
-## Demo cases
-
-- Case A: strong evidence, auto-submits evidence (`FIGHT`).
-- Case B: delivered address conflict, refunds under the cap (`REFUND`).
-- Case C: strong evidence above the approval threshold (`ESCALATE` and approval required).
-
-The backend provides the mock-mode API, SQLite persistence, deterministic assessment, settings, metrics, approval actions, and the core dashboard. PayPal sandbox adapters, real LLM providers, SSE replay, and the full approval/settings screens remain integration work for a later phase; no live credentials are used.
-
-## AG Studio
-
-The dashboard includes AG Studio 3.0.0 with three saved pages, flat analytics sources under `/analytics/*`, and custom read-only Verdict Card, Deadline Risk, and Guardrail Activity widgets. Analytics amount fields are numeric for charting; transactional API money remains decimal strings. Add a licensed key as `NEXT_PUBLIC_AG_STUDIO_LICENSE_KEY` in an ignored `.env.local` file for production. Local development works without it and may show the Studio watermark.
-
-The Agent Framework module is registered, but the server-side LLM proxy and provider adapter are intentionally not enabled until an `LLM_PROVIDER` and server key are configured. No client-side LLM key is used, and Studio has no payment, refund, evidence-submission, approval, or settings-changing tools.
-
-## Getting Started
-
-First, run the development server:
-
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
-
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
-
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
-
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
 
 ## Learn More
 

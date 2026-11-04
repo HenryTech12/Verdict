@@ -1,5 +1,6 @@
 from decimal import Decimal
 
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -24,7 +25,21 @@ class Settings(BaseSettings):
     refund_max_win_likelihood: float = 0.35
     min_confidence: float = 0.70
 
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(env_file=("../.env", ".env"), extra="ignore")
+
+    @model_validator(mode="after")
+    def validate_integrations(self) -> "Settings":
+        if self.paypal_mode not in {"mock", "sandbox"}:
+            raise ValueError("PAYPAL_MODE must be mock or sandbox")
+        if self.paypal_base_url != "https://api-m.sandbox.paypal.com":
+            raise ValueError("PAYPAL_BASE_URL must be https://api-m.sandbox.paypal.com")
+        if self.paypal_mode == "sandbox" and (not self.paypal_client_id or not self.paypal_client_secret):
+            raise ValueError("PAYPAL_CLIENT_ID and PAYPAL_CLIENT_SECRET are required when PAYPAL_MODE=sandbox")
+        if self.llm_provider not in {"mock", "groq"}:
+            raise ValueError("LLM_PROVIDER must be mock or groq")
+        if self.llm_provider == "groq" and not self.groq_api_key:
+            raise ValueError("GROQ_API_KEY is required when LLM_PROVIDER=groq")
+        return self
 
 
 settings = Settings()
