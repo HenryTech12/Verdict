@@ -37,7 +37,7 @@ stated assumptions, not measured. All data is seeded demo data; no real customer
 
 ## Tools and models used
 * **PayPal**: webhooks and signature verification, Customer Disputes API (provide evidence), Payments API (refund), sandbox only.
-* **LLM**: Groq-hosted `llama-3.3-70b-versatile` through a thin provider interface for the qualitative evidence assessment, rationale and packet narrative; a deterministic offline stand-in is the default so judges need no API key.
+* **LLM**: Groq-hosted `openai/gpt-oss-120b` through a thin provider interface for the qualitative evidence assessment, rationale and packet narrative; a deterministic offline stand-in is the default so judges need no API key.
 * **Backend**: FastAPI, SQLAlchemy, SQLite, server-sent events, httpx.
 * **Frontend**: Next.js, React, TypeScript, AG Grid Community, AG Studio (analytics pages), Tailwind.
 * **Quality**: pytest (472 tests), Vitest, Playwright, ESLint, TypeScript.
