@@ -240,3 +240,16 @@ def test_list_filters_and_auth(client):
     assert client.get("/disputes", headers={"Authorization": "Bearer nope"}).status_code == 401
     assert client.get("/disputes/DSP-NOPE").status_code == 404
     assert client.post("/sim/dispute?case=Z").status_code == 422
+
+
+def test_simulator_webhooks_still_work_in_sandbox_mode(client, monkeypatch):
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "paypal_mode", "sandbox")  # adapter now expects real PayPal signatures
+    monkeypatch.setattr(settings, "paypal_client_id", "x")
+    monkeypatch.setattr(settings, "paypal_client_secret", "y")
+    with SessionLocal() as db:
+        order, paypal_id = seed_store_data(db, "A")
+    payload = build_payload("A", order, paypal_id)
+    assert signed_post(client, payload, "deadbeef").status_code == 401  # a bad signature never passes via either path
+    assert signed_post(client, payload).json()["status"] == "created"  # a valid simulator HMAC does
