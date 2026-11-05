@@ -1,14 +1,30 @@
 "use client";
 
 import { useState } from "react";
-import { api } from "@/lib/api/client";
+import Link from "next/link";
+import { api, type CaseName } from "@/lib/api/client";
+import { timed } from "@/lib/timing";
 
-const cases = [{ id: "A", title: "Easy fight", detail: "Delivered, matching address, proof, and messages.", result: "FIGHT" }, { id: "B", title: "Conflict moment", detail: "Tracking delivered to an address that does not match.", result: "REFUND" }, { id: "C", title: "High value", detail: "Strong evidence, but above the approval threshold.", result: "ESCALATE" }] as const;
+const cases: { id: CaseName; title: string; detail: string; result: string; bonus?: boolean }[] = [
+  { id: "A", title: "Easy fight", detail: "$80 item-not-received claim. Delivered, address matches, delivery photo present.", result: "FIGHT" },
+  { id: "B", title: "Conflict moment", detail: "$90 claim. Tracking says delivered, but to an address that does not match the order.", result: "REFUND (auto, under the $100 cap)" },
+  { id: "C", title: "High value", detail: "$480 claim with strong evidence. Guardrail forces human approval despite a FIGHT recommendation.", result: "ESCALATE, then approve and submit" },
+  { id: "D", title: "Not as described", detail: "$70 claim under the second reason code, with its own checklist and a packing photo.", result: "FIGHT", bonus: true },
+  { id: "E", title: "Urgent deadline", detail: "$300 claim with 6 hours left. Needs approval and is flagged urgent.", result: "ESCALATE (URGENT)", bonus: true },
+  { id: "F", title: "Expired deadline", detail: "Deadline already passed. The agent logs and notifies, and takes no action.", result: "EXPIRED, no action", bonus: true },
+];
 
 export default function SimulatorPage() {
   const [notice, setNotice] = useState("Simulated data only");
-  const run = async (id: "A" | "B" | "C") => { setNotice(`Running Case ${id}...`); try { const result = await api.runSimulation(id); setNotice(`Created ${result.dispute_id}`); } catch { setNotice("Simulation failed"); } };
-  const runAll = async () => { for (const item of cases) { await run(item.id); await new Promise((resolve) => window.setTimeout(resolve, 2000)); } };
-  const reset = async () => { await api.resetDemo(); setNotice("Demo data reset and reseeded"); };
-  return <main className="main"><p className="eyebrow">VERDICT / SIMULATOR</p><h1>Scenario lab</h1><div className="sidebar-note"><strong>SIMULATED DATA</strong><span>Cases use generated orders and evidence. They never charge a customer in mock mode.</span></div><div className="sim-card-grid">{cases.map((item) => <article className="sim-card" key={item.id}><p className="eyebrow">CASE {item.id}</p><h2>{item.title}</h2><p>{item.detail}</p><span className="badge">Expected: {item.result}</span><button className="case-button primary" onClick={() => void run(item.id)}>Run Case {item.id}</button></article>)}</div><div className="sim-footer"><button className="case-button" onClick={() => void reset()}>Reset demo data</button><button className="case-button primary" onClick={() => void runAll()}>Run all three</button><span>{notice}</span></div></main>;
+  const [busy, setBusy] = useState(false);
+  const run = async (id: CaseName) => {
+    setBusy(true); setNotice(`Running Case ${id}...`);
+    try { const { value, ms } = await timed(() => api.runSimulation(id)); setNotice(`Case ${id} created ${value.dispute_id} in ${ms} ms`); } catch { setNotice("Simulation failed. Is the API running?"); } finally { setBusy(false); }
+  };
+  const runAll = async () => { for (const item of cases.filter((c) => !c.bonus)) await run(item.id); };
+  const reset = async () => { setBusy(true); try { await api.resetDemo(); setNotice("Demo data reset and reseeded"); } finally { setBusy(false); } };
+  return <main className="main"><p className="eyebrow">VERDICT / SIMULATOR</p><h1>Scenario lab</h1>
+    <div className="sidebar-note"><strong>SIMULATED DATA</strong><span>Each case seeds an order, shipment and messages, then fires a signed PayPal-style webhook at this app&apos;s own /webhooks/paypal endpoint. Nothing is charged in mock mode. <Link href="/">Back to the dashboard</Link></span></div>
+    <div className="sim-card-grid">{cases.map((item) => <article className="sim-card" key={item.id}><p className="eyebrow">CASE {item.id}{item.bonus ? " · BONUS" : ""}</p><h2>{item.title}</h2><p>{item.detail}</p><span className="badge">Expected: {item.result}</span><button className="case-button primary" disabled={busy} onClick={() => void run(item.id)}>Run Case {item.id}</button></article>)}</div>
+    <div className="sim-footer"><button className="case-button" disabled={busy} onClick={() => void reset()}>Reset demo data</button><button className="case-button primary" disabled={busy} onClick={() => void runAll()}>Run A, B and C</button><span aria-live="polite">{notice}</span></div></main>;
 }

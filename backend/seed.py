@@ -3,11 +3,11 @@ from decimal import Decimal
 from random import Random
 
 from app.db import Base, SessionLocal, engine
-from app.main import case_data
 from app.models import Assessment, Approval, AuditLog, Decision, Dispute, Merchant, Message, Order, Shipment
 from app.services.assessment import assess
 from app.services.guardrails import apply_guardrails
-from app.services.policy import choose_policy
+from app.services.policy import choose_policy_with_rule, lean_action
+from app.services.scenarios import case_data
 
 
 def seed() -> None:
@@ -30,19 +30,20 @@ def seed() -> None:
         db.flush()
         evidence = case_data("B")["evidence"] if conflict else case_data("A")["evidence"]
         result = assess(evidence, random.uniform(0.35, 0.98), random.uniform(0.72, 0.98))
-        policy = choose_policy(result["win_likelihood"], result["confidence"])
+        policy, rule_fired = choose_policy_with_rule(result["win_likelihood"], result["confidence"])
         action, rule = apply_guardrails(policy, amount, False, result["confidence"], result["conflicts"])
         status = {"FIGHT": "EVIDENCE_SUBMITTED", "REFUND": "REFUNDED", "ESCALATE": "RESOLVED", "EXPIRED": "EXPIRED"}[action]
         result.update({"recommended": policy, "rationale": "SIMULATED historical assessment", "packet_draft": "SIMULATED historical packet"})
         db.add(Assessment(dispute_id=dispute.id, evidence_json=result["evidence_items"], conflicts_json=result["conflicts"], checklist_score=result["checklist_score"], win_likelihood=result["win_likelihood"], confidence=result["confidence"], recommended=policy, rationale=result["rationale"], packet_draft=result["packet_draft"]))
-        db.add(Decision(dispute_id=dispute.id, policy_decision=policy, guardrail_rule=rule, final_action=action))
+        db.add(Decision(dispute_id=dispute.id, policy_decision=policy, rule_fired=rule_fired, guardrail_rule=rule, final_action=action))
         if action == "ESCALATE":
-            db.add(Approval(dispute_id=dispute.id, requested_action=policy, recommendation_summary="SIMULATED historical recommendation reviewed", status="REJECTED", decided_at=created + timedelta(days=2)))
+            db.add(Approval(dispute_id=dispute.id, requested_action=lean_action(result["win_likelihood"]), recommendation_summary="SIMULATED historical recommendation reviewed", status="REJECTED", decided_at=created + timedelta(days=2)))
         dispute.status = status
         dispute.resolved_at = created + timedelta(days=2)
         db.add(AuditLog(dispute_id=dispute.id, step="LOG", summary="SIMULATED historical case recorded", simulated=True))
     db.commit()
     db.close()
+    print("Seeded 120 simulated historical disputes.")
 
 
 if __name__ == "__main__":

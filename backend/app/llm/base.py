@@ -1,4 +1,4 @@
-from typing import Protocol
+from typing import Literal, Protocol
 
 from pydantic import BaseModel, Field
 
@@ -15,7 +15,7 @@ class AssessmentOutput(BaseModel):
     conflicts: list[str]
     win_likelihood: float = Field(ge=0, le=1)
     confidence: float = Field(ge=0, le=1)
-    recommended: str
+    recommended: Literal["FIGHT", "REFUND", "ESCALATE"]
     rationale: str
     packet_draft: str
     token_usage: dict[str, int] | None = None
