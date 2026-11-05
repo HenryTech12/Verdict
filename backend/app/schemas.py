@@ -39,6 +39,9 @@ class DisputeListItem(BaseModel):
     win_likelihood: float | None = None
     confidence: float | None = None
     decision: str | None = None
+    policy_decision: str | None = None
+    guardrail_rule: str | None = None
+    urgent: bool = False
     simulated: bool
     created_at: datetime
 
@@ -48,6 +51,11 @@ class DisputeListResponse(BaseModel):
     total: int
     page: int
     page_size: int
+
+
+class ApprovalActionBody(BaseModel):
+    note: str | None = Field(default=None, max_length=1000)
+    action: Literal["FIGHT", "REFUND"] | None = None
 
 
 class SimulationResponse(BaseModel):

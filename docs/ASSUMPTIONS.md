@@ -5,3 +5,8 @@
 - Analytics amounts are numeric only at `/analytics/*` because AG Studio chart fields require numeric measures; the transactional dispute API continues to expose money as decimal strings.
 - The local license key variable is `NEXT_PUBLIC_AG_STUDIO_LICENSE_KEY`, matching the provider's client-side license requirement. It is optional in local development and must be supplied through `.env.local` for a licensed deployment.
 - The current client keeps the existing drawer and simulator shell around the Studio canvas. This gives the Studio dashboard a stable application context while the remaining approval/settings routes are expanded.
+
+## Dispute table (AG Grid Community)
+
+- The main dispute table uses AG Grid **Community**. Master/detail and row grouping are Enterprise features, so the expandable reasoning row is implemented with Community full-width rows, and status "grouping" is implemented as filter chips.
+- Package versions are pinned by `package-lock.json` (`ag-studio` and `ag-studio-react` 3.0.0, `ag-grid-community` and `ag-grid-react` 36.2.0). Use `npm ci`, not `npm install`, because newer minor versions change the Studio types.

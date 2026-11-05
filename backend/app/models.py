@@ -80,6 +80,8 @@ class Assessment(Base):
     recommended: Mapped[str] = mapped_column(String(20))
     rationale: Mapped[str] = mapped_column(Text)
     packet_draft: Mapped[str] = mapped_column(Text)
+    llm_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    token_usage: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
 
 class Decision(Base):
@@ -87,6 +89,7 @@ class Decision(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     dispute_id: Mapped[str] = mapped_column(ForeignKey("disputes.id"), unique=True)
     policy_decision: Mapped[str] = mapped_column(String(20))
+    rule_fired: Mapped[str | None] = mapped_column(String(80), nullable=True)
     guardrail_rule: Mapped[str | None] = mapped_column(String(120), nullable=True)
     final_action: Mapped[str] = mapped_column(String(30))
 
@@ -100,6 +103,8 @@ class Approval(Base):
     recommendation_summary: Mapped[str] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
     decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    decided_by: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
 class AuditLog(Base):

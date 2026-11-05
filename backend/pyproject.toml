@@ -15,6 +15,11 @@ dependencies = [
 [project.optional-dependencies]
 test = ["pytest>=8,<9", "pytest-asyncio>=0.23,<1"]
 
+[tool.setuptools]
+packages = ["app", "app.adapters", "app.llm", "app.services"]
+py-modules = ["seed"]
+
 [tool.pytest.ini_options]
 pythonpath = ["."]
 testpaths = ["tests"]
+asyncio_mode = "auto"
