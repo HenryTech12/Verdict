@@ -50,8 +50,15 @@ class GroqProvider:
                     if usage:
                         result.token_usage = {key: int(value) for key, value in usage.items() if isinstance(value, int)}
                     return result
+                except httpx.HTTPStatusError as error:
+                    # Include Groq's own explanation (for example model_not_found) so failures are diagnosable.
+                    last_error = f"HTTP {error.response.status_code} from Groq: {error.response.text[:300]}"
+                    if error.response.status_code in (400, 401, 403, 404):
+                        break  # retrying cannot fix a bad model name, key or request
+                    if attempt < settings.llm_max_retries:
+                        await asyncio.sleep(0.5 * (attempt + 1))
                 except (httpx.HTTPError, ValueError, KeyError, IndexError) as error:
                     last_error = f"{type(error).__name__}: {error}"[:400]
                     if attempt < settings.llm_max_retries:
                         await asyncio.sleep(0.5 * (attempt + 1))
-        raise GroqProviderError(f"Groq assessment failed after {settings.llm_max_retries + 1} attempts: {last_error}")
+        raise GroqProviderError(f"Groq assessment failed: {last_error}")

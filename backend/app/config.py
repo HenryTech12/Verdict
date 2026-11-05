@@ -22,7 +22,7 @@ class Settings(BaseSettings):
 
     llm_provider: str = "mock"
     groq_api_key: str | None = None
-    llm_model: str = "llama-3.3-70b-versatile"
+    llm_model: str = "openai/gpt-oss-120b"
     llm_timeout_s: int = 30
     llm_max_retries: int = 2
     # Max amount the LLM may move the deterministic checklist score (+/-).
