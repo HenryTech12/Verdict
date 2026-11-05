@@ -13,6 +13,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.adapters import get_adapter
+from app.adapters.paypal_mock import MockPayPalAdapter
 from app.config import settings
 from app.db import Base, SessionLocal, engine, ensure_compat_schema, get_db
 from app.models import Action, Approval, Assessment, AuditLog, Decision, Dispute, Merchant, Message, Order, Shipment, WebhookEvent
@@ -83,7 +84,9 @@ async def paypal_webhook(request: Request, background: BackgroundTasks, db: Sess
     body = await request.body()
     adapter = get_adapter()
     try:
-        verified = await adapter.verify_webhook(dict(request.headers), body)
+        # Webhooks from our own simulator carry an HMAC signed with WEBHOOK_SIM_SECRET and are accepted in any mode;
+        # everything else must pass the active adapter's check (PayPal's signature verification in sandbox mode).
+        verified = await MockPayPalAdapter().verify_webhook(dict(request.headers), body) or await adapter.verify_webhook(dict(request.headers), body)
     except Exception as error:  # a verification outage must never accept an unverified event
         raise HTTPException(status_code=401, detail=error_body("UNAUTHORIZED", "Webhook signature could not be verified", {"reason": type(error).__name__})) from error
     if not verified:
