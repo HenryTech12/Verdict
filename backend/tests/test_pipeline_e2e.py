@@ -253,3 +253,14 @@ def test_simulator_webhooks_still_work_in_sandbox_mode(client, monkeypatch):
     payload = build_payload("A", order, paypal_id)
     assert signed_post(client, payload, "deadbeef").status_code == 401  # a bad signature never passes via either path
     assert signed_post(client, payload).json()["status"] == "created"  # a valid simulator HMAC does
+
+
+def test_store_order_links_a_real_capture_id_so_a_real_dispute_finds_its_evidence(client):
+    created = client.post("/sim/store-order?case=B&capture_id=REALCAPTURE123")
+    assert created.status_code == 201
+    assert client.post("/sim/store-order?case=B&capture_id=REALCAPTURE123").status_code == 409  # no duplicates
+    payload = {"id": "WH-REAL-2", "event_type": "CUSTOMER.DISPUTE.CREATED", "resource": {"dispute_id": "PP-D-REAL-1", "reason": "MERCHANDISE_OR_SERVICE_NOT_RECEIVED", "dispute_amount": {"value": "90.00", "currency_code": "USD"}, "disputed_transactions": [{"seller_transaction_id": "REALCAPTURE123"}]}}
+    assert signed_post(client, payload).json()["status"] == "created"
+    item = client.get("/disputes").json()["items"][0]
+    assert item["simulated"] is False and item["status"] == "REFUNDED"  # same evidence as Case B: conflict, so refund
+    assert client.post("/sim/store-order?case=Z&capture_id=REALCAPTURE999").status_code == 422
