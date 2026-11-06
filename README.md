@@ -60,7 +60,7 @@ PayPal webhook / simulator
 * **Gather**: tools read the order, tracking and delivery proof, address match, customer messages and merchant policy from the database.
 * **Assess**: a deterministic checklist score is the backbone. The LLM reads message text and edge details and can only **nudge** the score within +/-0.15. Output is schema-validated; invalid output is retried (max 2) then escalated.
 * **Decide**: FIGHT if win >= 0.60 and confidence >= 0.70; REFUND if win < 0.35 and confidence >= 0.70; otherwise ESCALATE. The rule that fired is recorded.
-* **Guard**: precedence is *expired > missing evidence > above approval threshold ($250) > refund above auto-refund cap ($100) > low confidence > conflicting evidence (blocks FIGHT)*. Guardrails can only **downgrade**, never upgrade. 472 unit tests pin this, including an exhaustive "never upgrade" property check.
+* **Guard**: precedence is *expired > missing evidence > above approval threshold ($250) > refund above auto-refund cap ($100) > low confidence > conflicting evidence (blocks FIGHT)*. Guardrails can only **downgrade**, never upgrade. 482 unit tests pin this, including an exhaustive "never upgrade" property check.
 * **Act**: FIGHT submits the evidence packet, REFUND refunds the capture, ESCALATE creates an approval request. Actions are **idempotent**: the idempotency key `dispute:action` is claimed before the adapter is called, so a retry or a double-click cannot refund twice. Transient failures retry twice, then the case is escalated with the error logged.
 * **Log**: every step stores timestamp, input, output, rule and action, and is pushed to the dashboard over server-sent events.
 
@@ -74,6 +74,11 @@ Full policy details: [docs/DECISION_POLICY.md](docs/DECISION_POLICY.md).
 * **Live updates** without refresh over SSE (`/stream`), with a LIVE indicator.
 * **Impact panel** with disputes handled, modeled revenue recovered and modeled time saved, labeled *modeled, not measured* with the assumptions shown.
 * Approval queue, merchant settings (caps, thresholds, policy text), evidence packet download, scenario lab, and AG Studio analytics pages.
+
+
+### PayPal sandbox checkout
+
+The `/payments` page provides a separate PayPal Checkout sandbox flow for creating and capturing test orders. It is not required for dispute processing. Configure `PAYPAL_MODE=sandbox`, `PAYPAL_CLIENT_ID`, and `PAYPAL_CLIENT_SECRET` on the backend. The browser receives only the public sandbox Client ID; the Client Secret remains server-side. Use PayPal sandbox buyer accounts only.
 
 ## API
 
@@ -93,7 +98,7 @@ Interactive docs at http://localhost:8000/docs. Requests use `Authorization: Bea
 ## Tests
 
 ```bash
-cd backend && python -m pytest -q     # 472 tests: guardrails, policy, scoring, webhooks, idempotency, cases A/B/C x3
+cd backend && python -m pytest -q     # 482 tests: guardrails, policy, scoring, webhooks, idempotency, cases A/B/C x3
 npm test && npm run lint              # frontend unit tests + lint
 npx tsc --noEmit                      # type check
 npm run test:e2e                      # Playwright UI flow (needs `npx playwright install chromium`)

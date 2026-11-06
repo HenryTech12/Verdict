@@ -40,7 +40,7 @@ stated assumptions, not measured. All data is seeded demo data; no real customer
 * **LLM**: Groq-hosted `openai/gpt-oss-120b` through a thin provider interface for the qualitative evidence assessment, rationale and packet narrative; a deterministic offline stand-in is the default so judges need no API key.
 * **Backend**: FastAPI, SQLAlchemy, SQLite, server-sent events, httpx.
 * **Frontend**: Next.js, React, TypeScript, AG Grid Community, AG Studio (analytics pages), Tailwind.
-* **Quality**: pytest (472 tests), Vitest, Playwright, ESLint, TypeScript.
+* **Quality**: pytest (482 tests), Vitest, Playwright, ESLint, TypeScript.
 * **Prizes targeted**: Best Use of PayPal + AI, Best Use of AG Grid, Most Impactful, main prizes (add Render if hosted there). Check the Official Rules on stacking prizes.
 
 ## Checklist before Nov 12, 2026, 9:00pm GMT+1

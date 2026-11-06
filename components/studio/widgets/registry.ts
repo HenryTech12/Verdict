@@ -1,32 +1,40 @@
 "use client";
 
+import { z } from "zod";
 import { createWidgets, type AgWidgetDefinition } from "ag-studio-react";
 import type { AgDefaultRegistry, AgWidgetsConfig } from "ag-studio";
 import VerdictCardWidget from "./VerdictCardWidget";
 import DeadlineRiskWidget from "./DeadlineRiskWidget";
 import GuardrailActivityWidget from "./GuardrailActivityWidget";
 
-type EmptyWidget = { dataMapping: Record<string, never>; format?: { title?: { enabled?: boolean; text?: string } } };
-
 const makeDefinition = (id: string, label: string, comp: AgWidgetDefinition["comp"], description: string): AgWidgetDefinition => ({
   id,
   label,
   comp,
-  form: (params) => params.createDefaults({ dataMappingItems: [] }),
-  defaultSize: { width: 360, height: 240 },
-  minSize: { width: 240, height: 160 },
-  ai: { description, usage: "Read-only analysis widget. It cannot issue payment actions." },
+  formatShape: () => z.object({ style: z.object({ heading: z.string().optional() }).optional() }),
+  form: (params) => {
+    const form = params.createDefaults({ dataMappingItems: [] });
+    form.items[0]?.items.push({
+      type: "section",
+      key: "verdictDisplaySettings",
+      label: "Display settings",
+      items: [{ type: "text", id: "format.style.heading", label: "Widget heading", defaultValue: label }],
+    });
+    return form;
+  },
+  defaultState: { format: { style: { heading: label } } } as never,
+  defaultSize: { width: 380, height: 300 },
+  minSize: { width: 260, height: 200 },
+  ai: { description, usage: "Read-only analytics widget. It can inspect dispute data but cannot approve, refund, or submit evidence." },
 });
 
 const definitions = [
-    makeDefinition("verdict-card", "Verdict Card", VerdictCardWidget, "Shows the latest dispute decision, win likelihood, confidence, rationale, and guardrail rule."),
-    makeDefinition("deadline-risk", "Deadline Risk", DeadlineRiskWidget, "Ranks open disputes by time remaining and highlights urgent deadlines."),
-    makeDefinition("guardrail-activity", "Guardrail Activity", GuardrailActivityWidget, "Shows which code-enforced guardrails prevented risky automatic actions."),
+  makeDefinition("verdict-card", "Latest Verdict", VerdictCardWidget, "Shows the most recent real dispute assessment, decision, win likelihood, confidence and guardrail."),
+  makeDefinition("deadline-risk", "Deadline Risk", DeadlineRiskWidget, "Ranks real open disputes by time remaining and lets the user open the selected dispute."),
+  makeDefinition("guardrail-activity", "Guardrail Activity", GuardrailActivityWidget, "Summarises recorded deterministic guardrail interventions by rule."),
 ];
 
 export const customWidgets = (defaults: AgWidgetsConfig<AgDefaultRegistry>) => createWidgets({
   additionalTypes: definitions as never,
-  menu: [{ label: "Verdict", widgetIds: ["verdict-card", "deadline-risk", "guardrail-activity"] as never }, ...(defaults.menu ?? [])],
+  menu: [{ label: "Verdict intelligence", widgetIds: ["verdict-card", "deadline-risk", "guardrail-activity"] as never }, ...(defaults.menu ?? [])],
 } as never) as never;
-
-export type { EmptyWidget };

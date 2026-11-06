@@ -26,3 +26,12 @@ matrix into this file before submitting:
 ```bash
 cd backend && python scripts/sandbox_spike.py [capture_id] [dispute_id]
 ```
+
+## Standalone sandbox checkout UI
+
+The frontend `/payments` route loads the PayPal JavaScript SDK using the public sandbox Client ID returned by `GET /paypal/config`. The backend keeps the Client Secret server-side and implements:
+
+- `POST /paypal/orders` — creates a USD sandbox order (maximum $5,000).
+- `POST /paypal/orders/{order_id}/capture` — captures an order after buyer approval.
+
+These checkout endpoints are separate from the dispute pipeline. They return `SANDBOX_REQUIRED` when `PAYPAL_MODE=mock`; they never simulate a successful payment. Use only PayPal sandbox buyer and merchant accounts. A successful checkout capture does not automatically create a dispute or attach the capture to an order; use the existing `/sim/store-order` workflow to link a real capture to seeded store data before testing a real dispute webhook.

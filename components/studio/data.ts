@@ -11,7 +11,12 @@ async function getRows(source: string): Promise<AnalyticsRow[]> {
   return response.json() as Promise<AnalyticsRow[]>;
 }
 
+export async function fetchStudioSource(id: "disputes" | "evidence" | "audit" | "guardrails" | "daily"): Promise<AnalyticsRow[]> {
+  return getRows(id);
+}
+
 export async function fetchStudioSources(): Promise<{ sources: StudioSource[] }> {
-  const [disputes, evidence, audit, guardrails, daily] = await Promise.all(["disputes", "evidence", "audit", "guardrails", "daily"].map(getRows));
-  return { sources: [{ id: "disputes", data: disputes }, { id: "evidence", data: evidence }, { id: "audit", data: audit }, { id: "guardrails", data: guardrails }, { id: "daily", data: daily }] };
+  const ids = ["disputes", "evidence", "audit", "guardrails", "daily"] as const;
+  const rows = await Promise.all(ids.map(getRows));
+  return { sources: ids.map((id, index) => ({ id, data: rows[index] })) };
 }

@@ -2,6 +2,7 @@
 Sandbox only: the base URL is pinned in config. Which calls actually succeed against sandbox data
 is reported by scripts/sandbox_spike.py; failures fall back to the labeled mock in the pipeline."""
 import json
+import uuid
 from decimal import Decimal
 
 import httpx
@@ -70,3 +71,24 @@ class SandboxPayPalAdapter:
             response = await client.post(f"{SANDBOX_URL}/v2/payments/captures/{capture_id}/refund", headers={"Authorization": f"Bearer {token}", "PayPal-Request-Id": request_id}, json={"amount": {"value": str(amount), "currency_code": currency}, "note_to_payer": note[:255]})
             response.raise_for_status()
             return response.json()
+    async def create_order(self, amount: Decimal, currency: str = "USD") -> dict:
+        """Create a PayPal Checkout sandbox order for the standalone test-payment screen."""
+        token = await self._access_token()
+        payload = {
+            "intent": "CAPTURE",
+            "purchase_units": [{"amount": {"currency_code": currency, "value": f"{amount:.2f}"}, "description": "Verdict sandbox test payment"}],
+            "application_context": {"brand_name": "Verdict Demo", "user_action": "PAY_NOW", "shipping_preference": "NO_SHIPPING"},
+        }
+        async with httpx.AsyncClient(timeout=30) as client:
+            response = await client.post(f"{SANDBOX_URL}/v2/checkout/orders", headers={"Authorization": f"Bearer {token}", "PayPal-Request-Id": uuid.uuid4().hex}, json=payload)
+            response.raise_for_status()
+            return response.json()
+
+    async def capture_order(self, order_id: str) -> dict:
+        """Capture an approved PayPal Checkout sandbox order."""
+        token = await self._access_token()
+        async with httpx.AsyncClient(timeout=30) as client:
+            response = await client.post(f"{SANDBOX_URL}/v2/checkout/orders/{order_id}/capture", headers={"Authorization": f"Bearer {token}", "PayPal-Request-Id": f"verdict-capture-{order_id}"}, json={})
+            response.raise_for_status()
+            return response.json()
+

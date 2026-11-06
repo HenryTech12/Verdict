@@ -35,11 +35,15 @@ export type Metrics = { disputes_handled: number; disputes_total: number; auto_r
 type DisputeListResponse = components["schemas"]["DisputeListResponse"];
 type ApprovalItem = components["schemas"]["ApprovalItem"];
 type SettingsResponse = components["schemas"]["SettingsSchema-Output"];
+type PayPalConfig = { mode: "mock" | "sandbox"; client_id: string | null; currency: "USD" };
 
 export const streamUrl = () => `${baseUrl}/stream?token=${encodeURIComponent(token)}`;
 
 export const api = {
   getHealth: () => request<Health>("/health"),
+  getPayPalConfig: () => request<PayPalConfig>("/paypal/config"),
+  createPayPalOrder: (amount: number) => request<{ id: string; status: string }>("/paypal/orders", { method: "POST", body: JSON.stringify({ amount, currency: "USD" }) }),
+  capturePayPalOrder: (orderId: string) => request<Record<string, unknown>>(`/paypal/orders/${encodeURIComponent(orderId)}/capture`, { method: "POST", body: JSON.stringify({}) }),
   getDisputes: (filters: DisputeFilters = {}) => request<DisputeListResponse>(`/disputes?${new URLSearchParams(Object.entries(filters).filter((entry): entry is [string, string] => entry[1] !== undefined).map(([key, value]) => [key, String(value)]))}`),
   getDispute: (id: string) => request<Record<string, unknown>>(`/disputes/${encodeURIComponent(id)}`),
   getApprovals: () => request<ApprovalItem[]>("/approvals?status=PENDING"),
