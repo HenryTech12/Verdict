@@ -26,7 +26,7 @@ from app.services.merchant import save_settings, settings_for
 from app.services.metrics import impact_metrics
 from app.services.scenarios import SCENARIOS
 from app.services.serializers import dispute_detail, serialize_many
-from app.services.simulator import fire_simulated_dispute
+from app.services.simulator import fire_simulated_dispute, seed_store_data
 
 
 @asynccontextmanager
@@ -108,6 +108,16 @@ async def simulate(case: str = Query(default="A", pattern="^[A-F]$"), db: Sessio
     except TimeoutError as error:
         raise HTTPException(status_code=504, detail=error_body("UPSTREAM_ERROR", str(error))) from error
     return SimulationResponse(dispute_id=dispute_id, case=case, simulated=True)
+
+
+@app.post("/sim/store-order", status_code=201, dependencies=[Depends(require_token)])
+def seed_real_order(case: str = Query(default="B", pattern="^[A-F]$"), capture_id: str = Query(min_length=5, max_length=64), db: Session = Depends(get_db)) -> dict:
+    """Link store data (order, shipment, messages) to a REAL PayPal sandbox capture id, so a real dispute
+    on that payment finds its evidence when the webhook arrives. Used by scripts/sandbox_order.py."""
+    if db.scalar(select(Order).where(Order.paypal_capture_id == capture_id)):
+        raise RuleError("ALREADY_PROCESSED", "An order with this capture id already exists")
+    order, _ = seed_store_data(db, case, capture_id=capture_id)
+    return {"order_id": order.id, "capture_id": capture_id, "case": case}
 
 
 @app.get("/sim/cases", dependencies=[Depends(require_token)])

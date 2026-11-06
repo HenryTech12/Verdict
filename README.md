@@ -10,7 +10,7 @@ Built as a prototype for the PayPal AI Hackathon. It is **not** an official PayP
 > **Honesty note.** By default PayPal calls are served by a clearly labeled **mock adapter** and disputes come from a
 > built-in **simulator** that posts signed PayPal-style webhooks to this app's own endpoint. With `PAYPAL_MODE=sandbox`
 > the real PayPal sandbox is used where it supports the call. See [docs/PAYPAL_CALLS.md](docs/PAYPAL_CALLS.md) for
-> exactly which calls are real and which are simulated.
+> exactly which calls are real and which are simulated, and [docs/REAL_SANDBOX_FLOW.md](docs/REAL_SANDBOX_FLOW.md) to run one fully real dispute end to end.
 
 ## Run it (under 10 minutes)
 
