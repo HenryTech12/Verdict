@@ -1,0 +1,46 @@
+/* AG Grid dispute table, detail rows and impact panel */
+.grid-shell { padding: 0 24px 24px; }
+.grid-toolbar { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
+.grid-toolbar .filters { display: flex; gap: 6px; flex-wrap: wrap; }
+.chip { border: 1px solid var(--border); background: var(--surface); color: var(--foreground); border-radius: 999px; padding: 6px 12px; font-size: 12px; font-weight: 600; cursor: pointer; display: inline-flex; gap: 7px; align-items: center; }
+.chip b { background: var(--background); border-radius: 999px; padding: 1px 7px; font-size: 11px; color: var(--muted); }
+.chip.active { background: var(--blue); border-color: var(--blue); color: #fff; }
+.chip.active b { background: #ffffff33; color: #fff; }
+.grid-toolbar .search { display: flex; align-items: center; gap: 8px; border: 1px solid var(--border); border-radius: 8px; padding: 7px 10px; background: var(--surface); }
+.grid-toolbar .search input { border: 0; outline: 0; background: transparent; color: var(--foreground); font-size: 13px; min-width: 190px; }
+.grid-frame { width: 100%; }
+.case-id-cell { display: inline-flex; align-items: center; gap: 6px; }
+.sub { display: block; color: var(--muted); font-size: 11px; line-height: 1.2; margin-top: -10px; }
+.deadline { font-weight: 700; font-variant-numeric: tabular-nums; border-radius: 6px; padding: 3px 8px; }
+.deadline.ok { color: var(--green); } .deadline.soon { color: var(--amber); background: #d9770622; }
+.deadline.urgent { color: #fff; background: var(--danger); } .deadline.expired { color: var(--muted); background: var(--background); } .deadline.closed { color: var(--muted); font-weight: 500; }
+.likelihood { display: inline-flex; align-items: center; gap: 8px; width: 100%; }
+.likelihood .bar { flex: 1; height: 8px; background: var(--border); border-radius: 99px; overflow: hidden; }
+.likelihood .bar i { display: block; height: 100%; border-radius: 99px; } .bar i.hi { background: var(--green); } .bar i.mid { background: var(--amber); } .bar i.lo { background: var(--danger); }
+.decision-badge { border-radius: 6px; padding: 4px 9px; font-size: 12px; font-weight: 700; background: var(--background); }
+.decision-badge.fight { background: #16a34a22; color: var(--green); } .decision-badge.refund { background: #0070e022; color: var(--blue); } .decision-badge.escalate { background: #d9770622; color: var(--amber); } .decision-badge.expired { color: var(--muted); }
+.status-chip.s-awaiting_approval { color: var(--amber); } .status-chip.s-expired { color: var(--muted); }
+.ag-row.row-urgent { box-shadow: inset 4px 0 0 var(--danger); }
+.detail-row { display: grid; grid-template-columns: 1.25fr 1fr 1fr; gap: 22px; padding: 18px 24px; height: 100%; overflow-y: auto; background: var(--surface-raised); font-size: 13px; line-height: 1.45; white-space: normal; }
+.detail-row h3 { font-size: 18px; margin: 4px 0 8px; } .detail-row .arrow { color: var(--amber); }
+.detail-row .rationale { margin: 0 0 10px; } .meter-line { display: flex; gap: 8px; align-items: baseline; margin: 6px 0; } .meter-line b { margin-right: 14px; }
+.rule-line { color: var(--muted); margin: 6px 0; } .guard-note { background: #d9770618; border-left: 3px solid var(--amber); padding: 7px 10px; margin: 8px 0; border-radius: 4px; } .guard-note.danger { background: #dc262618; border-color: var(--danger); }
+.urgent-flag { color: var(--danger); font-weight: 800; letter-spacing: .04em; margin: 8px 0; }
+.approve-box { border: 1px solid var(--border); border-radius: 8px; padding: 12px; margin-top: 10px; background: var(--surface); }
+.approve-box input { width: 100%; border: 1px solid var(--border); border-radius: 6px; padding: 7px 9px; margin: 8px 0; background: var(--background); color: var(--foreground); }
+.drawer-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+.drawer-actions button { display: inline-flex; gap: 6px; align-items: center; border: 1px solid var(--border); background: var(--surface); color: var(--foreground); border-radius: 7px; padding: 8px 12px; font-weight: 600; cursor: pointer; }
+.drawer-actions button.primary { background: var(--blue); border-color: var(--blue); color: #fff; } .drawer-actions button:disabled { opacity: .5; cursor: wait; }
+.checklist { list-style: none; margin: 8px 0 12px; padding: 0; display: grid; gap: 8px; }
+.checklist li { display: grid; grid-template-columns: 22px 1fr; gap: 8px; position: relative; padding-bottom: 8px; border-bottom: 1px solid var(--border); }
+.checklist li small { display: block; color: var(--muted); } .checklist li.ok > span { color: var(--green); font-weight: 800; } .checklist li.missing > span { color: var(--danger); font-weight: 800; }
+.checklist li i { position: absolute; left: 30px; bottom: -1px; height: 2px; background: var(--green); } .checklist li.missing i { display: none; }
+.timeline { list-style: none; margin: 8px 0 0; padding: 0 0 0 12px; border-left: 2px solid var(--border); display: grid; gap: 10px; }
+.timeline li { position: relative; display: grid; } .timeline li::before { content: ""; position: absolute; left: -18px; top: 5px; width: 8px; height: 8px; border-radius: 50%; background: var(--blue); }
+.timeline small { color: var(--muted); }
+.metric { background: var(--surface-raised); border: 1px solid var(--border); border-radius: 8px; padding: 14px 16px; display: grid; gap: 4px; }
+.metric > span { display: flex; align-items: center; gap: 7px; color: var(--muted); font-size: 12px; font-weight: 600; } .metric strong { font-size: 26px; font-variant-numeric: tabular-nums; } .metric small { color: var(--muted); font-size: 11px; } .metric.accent strong { color: var(--green); }
+.live-badge { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 700; color: var(--muted); } .live-badge i { width: 8px; height: 8px; border-radius: 50%; background: var(--danger); } .live-badge.on i { background: var(--green); box-shadow: 0 0 0 4px #16a34a22; }
+.toast { position: fixed; right: 20px; bottom: 20px; z-index: 40; background: var(--foreground); color: var(--background); padding: 12px 16px; border-radius: 8px; display: flex; gap: 12px; align-items: center; max-width: 380px; } .toast button { background: none; border: 0; color: inherit; cursor: pointer; font-weight: 700; }
+.api-error { background: #dc262618; border: 1px solid var(--danger); color: var(--danger); padding: 10px 14px; border-radius: 8px; margin-bottom: 18px; font-weight: 600; }
+@media (max-width: 1100px) { .detail-row { grid-template-columns: 1fr; } }
