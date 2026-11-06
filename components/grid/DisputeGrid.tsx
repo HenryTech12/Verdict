@@ -50,14 +50,14 @@ function StatusCell({ value }: CustomCellRendererProps<GridRow>) {
 }
 
 const columns: ColDef<GridRow>[] = [
-  { field: "id", headerName: "Dispute", width: 170, cellRenderer: IdCell },
-  { field: "customer_name", headerName: "Customer", flex: 1, minWidth: 150, cellRenderer: ({ data }: CustomCellRendererProps<GridRow>) => <span><strong>{data!.customer_name}</strong><small className="sub">{data!.paypal_dispute_id}</small></span> },
-  { field: "amount", headerName: "Amount", width: 120, type: "rightAligned", valueGetter: (p) => Number(p.data?.amount), valueFormatter: (p) => money(p.value, p.data?.currency) },
-  { field: "reason", headerName: "Reason", width: 190, valueFormatter: (p) => pretty(p.value) },
-  { field: "deadline", headerName: "Deadline", width: 150, cellRenderer: DeadlineCell, comparator: (a: string, b: string) => new Date(a).getTime() - new Date(b).getTime() },
-  { field: "win_likelihood", headerName: "Win likelihood", width: 170, cellRenderer: LikelihoodCell, comparator: (a, b) => (a ?? -1) - (b ?? -1) },
-  { field: "decision", headerName: "Decision", width: 200, cellRenderer: DecisionCell },
-  { field: "status", headerName: "Status", width: 190, cellRenderer: StatusCell },
+  { field: "id", headerName: "Dispute", flex: 1.05, minWidth: 132, cellRenderer: IdCell },
+  { field: "customer_name", headerName: "Customer", flex: 1.2, minWidth: 142, cellRenderer: ({ data }: CustomCellRendererProps<GridRow>) => <span><strong>{data!.customer_name}</strong><small className="sub">{data!.paypal_dispute_id}</small></span> },
+  { field: "amount", headerName: "Amount", flex: 0.72, minWidth: 92, type: "rightAligned", valueGetter: (p) => Number(p.data?.amount), valueFormatter: (p) => money(p.value, p.data?.currency) },
+  { field: "reason", headerName: "Reason", flex: 1.05, minWidth: 128, valueFormatter: (p) => pretty(p.value) },
+  { field: "deadline", headerName: "Deadline", flex: 0.95, minWidth: 126, cellRenderer: DeadlineCell, comparator: (a: string, b: string) => new Date(a).getTime() - new Date(b).getTime() },
+  { field: "win_likelihood", headerName: "Win likelihood", flex: 1.05, minWidth: 142, cellRenderer: LikelihoodCell, comparator: (a, b) => (a ?? -1) - (b ?? -1) },
+  { field: "decision", headerName: "Decision", flex: 1.0, minWidth: 132, cellRenderer: DecisionCell },
+  { field: "status", headerName: "Status", flex: 1.0, minWidth: 132, cellRenderer: StatusCell },
 ];
 
 type Props = { disputes: Dispute[]; dark: boolean; onChanged: () => void; openDrawer: (id: string) => void };
@@ -84,12 +84,12 @@ export default function DisputeGrid({ disputes, dark, onChanged, openDrawer }: P
       </div>
       <label className="search"><Search size={15} /><input aria-label="Search disputes" placeholder="Search ID or customer" value={query} onChange={(event) => setQuery(event.target.value)} /></label>
     </div>
-    <div className="grid-frame" data-ag-theme-mode={dark ? "dark" : "light"} style={{ height: 680 }}>
+    <div className="grid-frame" data-ag-theme-mode={dark ? "dark" : "light"} style={{ height: 620, width: "100%", colorScheme: dark ? "dark" : "light" }}>
       <AgGridReact<GridRow>
         theme={theme}
         rowData={rows}
         columnDefs={columns}
-        defaultColDef={{ sortable: true, resizable: true, enableCellChangeFlash: true }}
+        defaultColDef={{ sortable: true, resizable: true, enableCellChangeFlash: true, wrapHeaderText: true, autoHeaderHeight: true }}
         context={context}
         getRowId={(params) => params.data.id}
         isFullWidthRow={(params) => Boolean(params.rowNode.data?.__detail)}

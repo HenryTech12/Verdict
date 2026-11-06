@@ -12,5 +12,5 @@ logos (the PRD requires no copyrighted music or third-party trademarks). Say "si
 | 1:30 | Click **Case C** | "Case C: $480, strong evidence. The policy says FIGHT, but a guardrail in code says anything above $250 needs a human. The model cannot override that." Show the GUARDRAIL line and the Awaiting approval chip. |
 | 1:55 | Approve in the row | "I approve and the packet is submitted. Every step is in the audit log with its inputs, outputs and rule." |
 | 2:10 | Click **Case E**, then Settings | "A case with under 24 hours left is flagged urgent and sorted first. Limits are mine to set: change the refund cap and the next case respects it." |
-| 2:30 | Impact panel, README test section | "Impact is modeled, not measured, and the assumptions are shown. Guardrails have 472 unit tests, including a check that no input can make the agent take a riskier action than the model proposed." |
+| 2:30 | Impact panel, README test section | "Impact is modeled, not measured, and the assumptions are shown. Guardrails have 482 unit tests, including a check that no input can make the agent take a riskier action than the model proposed." |
 | 2:50 | Title card | "Verdict. Know which disputes to fight." |

@@ -2,7 +2,7 @@
 
 import { useCallback, useState } from "react";
 import { useRouter } from "next/navigation";
-import { LayoutDashboard, Moon, Play, RotateCcw, Settings, ShieldCheck, Sparkles, Sun } from "lucide-react";
+import { CreditCard, LayoutDashboard, Moon, Play, RotateCcw, Settings, ShieldCheck, Sparkles, Sun } from "lucide-react";
 import VerdictStudio from "@/components/studio/VerdictStudio";
 import DisputeDrawer, { type DisputeDetail } from "@/components/disputes/DisputeDrawer";
 import DisputeGrid from "@/components/grid/DisputeGrid";
@@ -47,6 +47,7 @@ export default function Home() {
         <button className="nav-item active"><LayoutDashboard size={17} /><span>Dashboard</span></button>
         <button className="nav-item" onClick={() => router.push("/approvals")}><ShieldCheck size={17} /><span>Approvals</span>{pending > 0 && <b>{pending}</b>}</button>
         <button className="nav-item" onClick={() => router.push("/simulator")}><Play size={17} /><span>Simulator</span></button>
+        <button className="nav-item" onClick={() => router.push("/payments")}><CreditCard size={17} /><span>Payments</span></button>
         <button className="nav-item" onClick={() => router.push("/settings")}><Settings size={17} /><span>Settings</span></button>
       </nav>
       <div className="sidebar-note"><Sparkles size={16} /><div><strong>{paypalMode === "MOCK" ? "SIMULATED PAYPAL CALLS" : "PAYPAL SANDBOX"}</strong><span>{paypalMode === "MOCK" ? "Refunds and evidence submissions are labeled mocks. No real money moves." : "Real sandbox calls where supported; any mock fallback is labeled in the audit log."}</span></div></div>
@@ -59,14 +60,14 @@ export default function Home() {
       </header>
       {error && <p className="api-error" role="alert">{error}</p>}
       <ImpactPanel metrics={metrics} pending={pending} />
+      <section className="studio-section"><div className="studio-section-head"><div><p className="eyebrow">AG STUDIO / ANALYST WORKSPACE</p><h2>Dispute intelligence</h2><p className="studio-subtitle">Explore live case data, deadline exposure and guardrail activity with the analyst agent.</p></div><span>Overview · Risk · Case explorer</span></div><VerdictStudio openDispute={(id) => void openDrawer(id)} /></section>
       <section className="workspace">
         <div className="workspace-head">
-          <div><p className="eyebrow">ALL DISPUTES · CLICK A ROW FOR THE AGENT&apos;S REASONING</p><h2>Cases</h2></div>
+          <div><p className="eyebrow">ALL DISPUTES · CLICK A ROW FOR THE AGENT&apos;S REASONING</p><h2>Dispute operations</h2></div>
           <div className="sim-controls"><span className="sim-label">SIMULATOR</span>{CASES.map((item) => <button className="case-button" key={item.id} disabled={running} title={item.hint} onClick={() => void runCase(item.id)}><Play size={13} fill="currentColor" /> Case {item.label}</button>)}</div>
         </div>
         <DisputeGrid disputes={disputes} dark={dark} onChanged={onChanged} openDrawer={(id) => void openDrawer(id)} />
       </section>
-      <section className="studio-section"><div className="studio-section-head"><div><p className="eyebrow">AG STUDIO ANALYTICS</p><h2>Explore the dispute system</h2></div><span>Three saved pages</span></div><VerdictStudio openDispute={(id) => void openDrawer(id)} /></section>
       <p className="status-line" aria-live="polite"><span className="status-pulse" /> {notice}</p>
     </main>
     {selected && <DisputeDrawer detail={selected} onClose={() => setSelected(null)} onUpdated={(detail) => setSelected(detail)} onAction={onChanged} />}

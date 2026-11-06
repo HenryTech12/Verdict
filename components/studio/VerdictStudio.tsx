@@ -15,14 +15,14 @@ const initialState = {
     {
       id: "overview",
       widgets: {
-        value: { type: "value", dataMapping: { value: [{ id: "disputes.id", aggregation: "count" }] } },
-        status: { type: "donut-chart", dataMapping: { categoryKey: [{ id: "disputes.status" }], valueKey: [{ id: "disputes.id", aggregation: "count" }] } },
+        value: { type: "value", dataMapping: { value: [{ id: "disputes.id", aggregation: "count" }] }, format: { title: { enabled: true, text: "Total disputes" } } },
+        status: { type: "donut-chart", dataMapping: { categoryKey: [{ id: "disputes.status" }], valueKey: [{ id: "disputes.id", aggregation: "count" }] }, format: { title: { enabled: true, text: "Dispute status distribution" } } },
         verdict: { type: "verdict-card", dataMapping: {} },
       },
       widgetLayout: {
-        value: { xTrack: 0, yTrack: 0, xSpan: 8, ySpan: 10 },
-        status: { xTrack: 8, yTrack: 0, xSpan: 8, ySpan: 18 },
-        verdict: { xTrack: 16, yTrack: 0, xSpan: 8, ySpan: 18 },
+        value: { xTrack: 0, yTrack: 0, xSpan: 8, ySpan: 16 },
+        status: { xTrack: 8, yTrack: 0, xSpan: 8, ySpan: 16 },
+        verdict: { xTrack: 16, yTrack: 0, xSpan: 8, ySpan: 16 },
       },
     },
     {
@@ -30,12 +30,12 @@ const initialState = {
       widgets: {
         deadline: { type: "deadline-risk", dataMapping: {} },
         guardrails: { type: "guardrail-activity", dataMapping: {} },
-        scatter: { type: "scatter-chart", dataMapping: { groupByKey: [{ id: "disputes.id" }], categoryKey: [{ id: "disputes.amount_value" }], valueKey: [{ id: "disputes.win_likelihood" }] } },
+        scatter: { type: "bar-chart-grouped", dataMapping: { categoryKey: [{ id: "disputes.status" }], valueKey: [{ id: "disputes.id", aggregation: "count" }] }, format: { title: { enabled: true, text: "Disputes by status" } } },
       },
       widgetLayout: {
-        deadline: { xTrack: 0, yTrack: 0, xSpan: 8, ySpan: 18 },
-        guardrails: { xTrack: 8, yTrack: 0, xSpan: 8, ySpan: 18 },
-        scatter: { xTrack: 16, yTrack: 0, xSpan: 8, ySpan: 18 },
+        deadline: { xTrack: 0, yTrack: 0, xSpan: 8, ySpan: 20 },
+        guardrails: { xTrack: 8, yTrack: 0, xSpan: 8, ySpan: 20 },
+        scatter: { xTrack: 16, yTrack: 0, xSpan: 8, ySpan: 20 },
       },
     },
     {
@@ -43,7 +43,7 @@ const initialState = {
       widgets: {
         grid: { type: "grid", dataMapping: { cols: [{ id: "disputes.id" }, { id: "disputes.customer_name" }, { id: "disputes.amount_value" }, { id: "disputes.status" }, { id: "disputes.decision" }] } },
       },
-      widgetLayout: { grid: { xTrack: 0, yTrack: 0, xSpan: 24, ySpan: 30 } },
+      widgetLayout: { grid: { xTrack: 0, yTrack: 0, xSpan: 24, ySpan: 24 } },
     },
   ],
   selectedPageId: "overview",
@@ -57,5 +57,5 @@ export default function VerdictStudio({ openDispute }: Props) {
   const widgets = useMemo(() => customWidgets, []);
   const ai = useMemo<AgAiHarnessSetup | undefined>(() => aiEnabled ? ({ api }) => createAiHarness(api, { adapter: groqStudioAdapter, promptStarters: [{ label: "Deadline risk", prompt: "Which disputes are closest to their deadline?" }, { label: "Guardrails", prompt: "Show how many risky actions the guardrails blocked this month" }, { label: "Weekly decisions", prompt: "Chart refunds vs fights by week" }] }) : undefined, [aiEnabled]);
   if (error) return <div className="studio-fallback"><p className="eyebrow">AG STUDIO</p><strong>{error}</strong><span>Start the FastAPI backend and refresh this dashboard.</span></div>;
-  return <AgStudioProvider modules={[AgStudioAiModule]} licenseKey={process.env.NEXT_PUBLIC_AG_STUDIO_LICENSE_KEY}><div className="studio-frame"><AgStudio data={data} widgets={widgets} initialState={initialState} mode="view" ai={ai} context={{ openDispute }} /></div></AgStudioProvider>;
+  return <AgStudioProvider modules={[AgStudioAiModule]} licenseKey={process.env.NEXT_PUBLIC_AG_STUDIO_LICENSE_KEY}><div className="studio-frame"><AgStudio data={data} widgets={widgets} initialState={initialState} mode="edit" ai={ai} context={{ openDispute }} /></div></AgStudioProvider>;
 }

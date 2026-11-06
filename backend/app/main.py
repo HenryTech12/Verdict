@@ -4,11 +4,13 @@ import time
 from collections import deque
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
+from decimal import Decimal
 
 from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, PlainTextResponse, StreamingResponse
+from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -45,6 +47,12 @@ async def lifespan(_app: FastAPI):
 app = FastAPI(title="Verdict API", version="1.0.0", lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=[settings.frontend_origin, "http://127.0.0.1:3000", "http://localhost:3000"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 ai_requests: deque[float] = deque()
+
+
+class PayPalOrderBody(BaseModel):
+    amount: float = Field(gt=0, le=5000)
+    currency: str = Field(default="USD", pattern="^USD$")
+
 
 
 def error_body(code: str, message: str, details: dict | None = None) -> dict:
@@ -205,28 +213,117 @@ async def stream(request: Request, token: str | None = None, last_event_id: int 
 
 @app.post("/ai/proxy", dependencies=[Depends(require_token)])
 async def ai_proxy(request: Request) -> JSONResponse:
+    """Narrow, server-controlled Groq proxy for AG Studio. Client payloads never choose model,
+    token budget, streaming mode, or arbitrary upstream request fields."""
     if settings.llm_provider != "groq" or not settings.groq_api_key:
-        raise HTTPException(status_code=502, detail={"error": {"code": "UPSTREAM_ERROR", "message": "Groq is not configured", "details": {}}})
+        raise HTTPException(status_code=502, detail=error_body("UPSTREAM_ERROR", "Groq is not configured"))
     body = await request.body()
     if len(body) > 100_000:
-        raise HTTPException(status_code=422, detail={"error": {"code": "VALIDATION_ERROR", "message": "AI request is too large", "details": {"max_bytes": 100000}}})
+        raise HTTPException(status_code=422, detail=error_body("VALIDATION_ERROR", "AI request is too large", {"max_bytes": 100000}))
+    try:
+        incoming = json.loads(body or b"{}")
+    except json.JSONDecodeError as error:
+        raise HTTPException(status_code=422, detail=error_body("VALIDATION_ERROR", "AI request must be JSON")) from error
+    if not isinstance(incoming, dict) or not isinstance(incoming.get("messages"), list):
+        raise HTTPException(status_code=422, detail=error_body("VALIDATION_ERROR", "A messages array is required"))
+    messages = []
+    if len(incoming["messages"]) > 24:
+        raise HTTPException(status_code=422, detail=error_body("VALIDATION_ERROR", "Too many conversation messages"))
+    allowed_roles = {"system", "user", "assistant", "tool"}
+    for item in incoming["messages"]:
+        if not isinstance(item, dict) or item.get("role") not in allowed_roles:
+            raise HTTPException(status_code=422, detail=error_body("VALIDATION_ERROR", "Invalid message role"))
+        content = item.get("content", "")
+        if content is None and item["role"] == "assistant" and isinstance(item.get("tool_calls"), list):
+            content = ""
+        if not isinstance(content, str) or len(content) > 12000:
+            raise HTTPException(status_code=422, detail=error_body("VALIDATION_ERROR", "Message content must be text under 12,000 characters"))
+        message = {"role": item["role"], "content": content}
+        if item["role"] == "tool" and isinstance(item.get("tool_call_id"), str):
+            message["tool_call_id"] = item["tool_call_id"][:128]
+        if item["role"] == "assistant" and isinstance(item.get("tool_calls"), list):
+            safe_calls = []
+            for call in item["tool_calls"][:8]:
+                if not isinstance(call, dict) or not isinstance(call.get("function"), dict):
+                    continue
+                fn = call["function"]
+                if isinstance(fn.get("name"), str) and isinstance(fn.get("arguments"), str):
+                    safe_calls.append({"id": str(call.get("id", ""))[:128], "type": "function", "function": {"name": fn["name"][:64], "arguments": fn["arguments"][:12000]}})
+            if safe_calls:
+                message["tool_calls"] = safe_calls
+        messages.append(message)
+    if not messages:
+        raise HTTPException(status_code=422, detail=error_body("VALIDATION_ERROR", "At least one message is required"))
+
+    payload: dict = {"model": settings.llm_model, "messages": messages, "temperature": 0.1, "max_completion_tokens": 1200, "stream": False}
+    tools = incoming.get("tools")
+    if isinstance(tools, list) and tools:
+        safe_tools = []
+        for item in tools[:8]:
+            if not isinstance(item, dict) or item.get("type") != "function" or not isinstance(item.get("function"), dict):
+                continue
+            fn = item["function"]
+            name, description, parameters = fn.get("name"), fn.get("description", ""), fn.get("parameters")
+            if not isinstance(name, str) or not name.replace("_", "").isalnum() or not isinstance(parameters, dict):
+                continue
+            safe_tools.append({"type": "function", "function": {"name": name[:64], "description": str(description)[:500], "parameters": parameters}})
+        if safe_tools:
+            payload["tools"] = safe_tools
+            choice = incoming.get("tool_choice", "auto")
+            if choice in ("auto", "none", "required"):
+                payload["tool_choice"] = choice
+            elif isinstance(choice, dict) and isinstance(choice.get("function"), dict) and isinstance(choice["function"].get("name"), str):
+                payload["tool_choice"] = {"type": "function", "function": {"name": choice["function"]["name"][:64]}}
+            else:
+                payload["tool_choice"] = "auto"
+            payload["parallel_tool_calls"] = False
+    if isinstance(incoming.get("response_format"), dict) and incoming["response_format"].get("type") == "json_object":
+        payload["response_format"] = {"type": "json_object"}
     now = time.monotonic()
     while ai_requests and now - ai_requests[0] > 60:
         ai_requests.popleft()
     if len(ai_requests) >= 20:
-        raise HTTPException(status_code=429, detail={"error": {"code": "UPSTREAM_ERROR", "message": "AI rate limit exceeded", "details": {"limit": 20, "window_seconds": 60}}})
-    try:
-        payload = json.loads(body or b"{}")
-    except json.JSONDecodeError as error:
-        raise HTTPException(status_code=422, detail={"error": {"code": "VALIDATION_ERROR", "message": "AI request must be JSON", "details": {}}}) from error
-    payload["model"] = settings.llm_model
+        raise HTTPException(status_code=429, detail=error_body("UPSTREAM_ERROR", "AI rate limit exceeded", {"limit": 20, "window_seconds": 60}))
     ai_requests.append(now)
     import httpx
-    async with httpx.AsyncClient(timeout=settings.llm_timeout_s) as client:
-        response = await client.post("https://api.groq.com/openai/v1/chat/completions", headers={"Authorization": f"Bearer {settings.groq_api_key}", "Content-Type": "application/json"}, json=payload)
-    if response.status_code >= 400:
-        raise HTTPException(status_code=502, detail={"error": {"code": "UPSTREAM_ERROR", "message": "Groq request failed", "details": {"status": response.status_code}}})
-    return JSONResponse(status_code=response.status_code, content=response.json())
+    try:
+        async with httpx.AsyncClient(timeout=settings.llm_timeout_s) as client:
+            response = await client.post("https://api.groq.com/openai/v1/chat/completions", headers={"Authorization": f"Bearer {settings.groq_api_key}", "Content-Type": "application/json"}, json=payload)
+        if response.status_code >= 400:
+            raise HTTPException(status_code=502, detail=error_body("UPSTREAM_ERROR", "Groq rejected the analyst request", {"status": response.status_code, "upstream": response.text[:500]}))
+        return JSONResponse(content=response.json())
+    except httpx.TimeoutException as error:
+        raise HTTPException(status_code=504, detail=error_body("UPSTREAM_ERROR", "Groq request timed out")) from error
+    except httpx.HTTPError as error:
+        raise HTTPException(status_code=502, detail=error_body("UPSTREAM_ERROR", "Could not reach Groq")) from error
+
+
+@app.get("/paypal/config", dependencies=[Depends(require_token)])
+def paypal_checkout_config() -> dict:
+    return {"mode": settings.paypal_mode, "client_id": settings.paypal_client_id if settings.paypal_mode == "sandbox" else None, "currency": "USD"}
+
+
+@app.post("/paypal/orders", dependencies=[Depends(require_token)])
+async def create_paypal_order(body: PayPalOrderBody) -> dict:
+    if settings.paypal_mode != "sandbox":
+        raise HTTPException(status_code=409, detail=error_body("SANDBOX_REQUIRED", "PayPal Checkout is available only when PAYPAL_MODE=sandbox"))
+    try:
+        result = await get_adapter().create_order(Decimal(str(body.amount)).quantize(Decimal("0.01")), body.currency)
+        return {"id": result.get("id"), "status": result.get("status"), "links": result.get("links", [])}
+    except Exception as error:
+        raise HTTPException(status_code=502, detail=error_body("PAYPAL_ERROR", "PayPal sandbox could not create the order", {"reason": str(error)[:300]})) from error
+
+
+@app.post("/paypal/orders/{order_id}/capture", dependencies=[Depends(require_token)])
+async def capture_paypal_order(order_id: str) -> dict:
+    if settings.paypal_mode != "sandbox":
+        raise HTTPException(status_code=409, detail=error_body("SANDBOX_REQUIRED", "PayPal Checkout is available only when PAYPAL_MODE=sandbox"))
+    if not order_id or len(order_id) > 80 or not order_id.replace("-", "").isalnum():
+        raise HTTPException(status_code=422, detail=error_body("VALIDATION_ERROR", "Invalid PayPal order ID"))
+    try:
+        return await get_adapter().capture_order(order_id)
+    except Exception as error:
+        raise HTTPException(status_code=502, detail=error_body("PAYPAL_ERROR", "PayPal sandbox could not capture this order", {"reason": str(error)[:300]})) from error
 
 
 @app.get("/settings", response_model=SettingsSchema, dependencies=[Depends(require_token)])
@@ -266,7 +363,7 @@ def analytics_rows(db: Session) -> list[dict]:
         deadline = dispute.deadline.replace(tzinfo=timezone.utc) if dispute.deadline.tzinfo is None else dispute.deadline
         hours = (deadline - datetime.now(timezone.utc)).total_seconds() / 3600
         created = dispute.created_at.date().isoformat()
-        rows.append({"id": dispute.id, "paypal_dispute_id": dispute.paypal_dispute_id, "customer_name": order.customer_name, "amount_value": float(dispute.amount), "currency": dispute.currency, "reason": dispute.reason, "status": dispute.status, "decision": decision.policy_decision if decision else None, "final_action": decision.final_action if decision else None, "win_likelihood": assessment.win_likelihood if assessment else 0, "confidence": assessment.confidence if assessment else 0, "checklist_score": assessment.checklist_score if assessment else 0, "has_conflict": bool(assessment and assessment.conflicts_json), "conflict_summary": (assessment.conflicts_json[0] if assessment and assessment.conflicts_json else None), "guardrail_rule": decision.guardrail_rule if decision else None, "simulated": dispute.simulated, "created_at": dispute.created_at, "deadline": deadline, "hours_to_deadline": round(hours, 2), "resolved_at": dispute.created_at if dispute.status in ("REFUNDED", "EVIDENCE_SUBMITTED", "RESOLVED") else None, "day": created, "week": f"{dispute.created_at.isocalendar().year}-W{dispute.created_at.isocalendar().week:02d}"})
+        rows.append({"id": dispute.id, "paypal_dispute_id": dispute.paypal_dispute_id, "customer_name": order.customer_name, "amount_value": float(dispute.amount), "currency": dispute.currency, "reason": dispute.reason, "status": dispute.status, "decision": decision.policy_decision if decision else None, "final_action": decision.final_action if decision else None, "win_likelihood": assessment.win_likelihood if assessment else 0, "confidence": assessment.confidence if assessment else 0, "checklist_score": assessment.checklist_score if assessment else 0, "rationale": assessment.rationale if assessment else None, "llm_error": assessment.llm_error if assessment else None, "has_conflict": bool(assessment and assessment.conflicts_json), "conflict_summary": (assessment.conflicts_json[0] if assessment and assessment.conflicts_json else None), "guardrail_rule": decision.guardrail_rule if decision else None, "simulated": dispute.simulated, "created_at": dispute.created_at, "deadline": deadline, "hours_to_deadline": round(hours, 2), "resolved_at": dispute.created_at if dispute.status in ("REFUNDED", "EVIDENCE_SUBMITTED", "RESOLVED") else None, "day": created, "week": f"{dispute.created_at.isocalendar().year}-W{dispute.created_at.isocalendar().week:02d}"})
     return rows
 
 
@@ -293,7 +390,8 @@ def analytics_audit(db: Session = Depends(get_db)) -> list[dict]:
 
 @app.get("/analytics/guardrails", dependencies=[Depends(require_token)])
 def analytics_guardrails(db: Session = Depends(get_db)) -> list[dict]:
-    return [{"dispute_id": row.dispute_id, "rule": row.guardrail_rule, "outcome": "downgraded_to_escalate", "simulated": True} for row in db.scalars(select(Decision).where(Decision.guardrail_rule.is_not(None))).all()]
+    rows = db.execute(select(Decision, Dispute).join(Dispute, Dispute.id == Decision.dispute_id).where(Decision.guardrail_rule.is_not(None))).all()
+    return [{"dispute_id": decision.dispute_id, "rule": decision.guardrail_rule, "outcome": "downgraded_to_escalate", "simulated": dispute.simulated} for decision, dispute in rows]
 
 
 @app.get("/analytics/daily", dependencies=[Depends(require_token)])

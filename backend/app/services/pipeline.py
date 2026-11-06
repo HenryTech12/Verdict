@@ -105,11 +105,38 @@ def _transient(error: Exception) -> bool:
 async def execute_action(dispute: Dispute, action: str, order: Order | None, shipment: Shipment | None, packet: str) -> dict:
     """Run FIGHT or REFUND through the configured adapter. Transient failures retry (max 2) and then raise
     ActionFailed; sandbox gaps (unsupported call, 4xx) fall back to the labeled mock."""
-    adapter = get_adapter()
     request_id = f"{dispute.id}:{action}"
     capture_id = order.paypal_capture_id if order else ""
     tracking = {"carrier_name": "OTHER", "tracking_number": shipment.tracking} if shipment else None
     started = time.perf_counter()
+
+    # Simulator cases deliberately use synthetic PayPal IDs. Never send those IDs to
+    # PayPal's real sandbox: doing so creates noisy 400/404 events and can hide routing bugs.
+    # The persisted dispute flag is authoritative; the prefixes are a defensive backstop
+    # for older/demo records created before that flag was consistently populated.
+    synthetic_paypal_id = (
+        bool(getattr(dispute, "simulated", False))
+        or str(getattr(dispute, "paypal_dispute_id", "")).startswith("SIM-")
+        or str(capture_id).startswith("SIM-CAP-")
+    )
+    if synthetic_paypal_id:
+        fallback = MockPayPalAdapter()
+        mock = await (
+            fallback.provide_evidence(dispute.paypal_dispute_id, packet, tracking)
+            if action == "FIGHT"
+            else fallback.refund_capture(capture_id, dispute.amount, dispute.currency, "SIMULATED demo action", request_id)
+        )
+        mock["simulated"] = True
+        return {
+            "action": action,
+            "simulated": True,
+            "fallback_reason": "Synthetic simulator identifiers are never sent to PayPal.",
+            "result": mock,
+            "duration_ms": round((time.perf_counter() - started) * 1000),
+            "attempts": 0,
+        }
+
+    adapter = get_adapter()
     last_error: Exception | None = None
     for attempt in range(settings.action_max_retries + 1):
         try:

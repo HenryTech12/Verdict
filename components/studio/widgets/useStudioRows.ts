@@ -1,0 +1,40 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import { fetchStudioSource, type AnalyticsRow } from "../data";
+
+export function useStudioRows(source: "disputes" | "guardrails") {
+  const [rows, setRows] = useState<AnalyticsRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    let timer: number | undefined;
+    const load = async () => {
+      try {
+        const next = await fetchStudioSource(source);
+        if (active) { setRows(next); setError(null); }
+      } catch (reason) {
+        if (active) setError(reason instanceof Error ? reason.message : "Analytics unavailable");
+      } finally {
+        if (active) setLoading(false);
+      }
+    };
+    void load();
+    timer = window.setInterval(() => void load(), 15000);
+    return () => { active = false; if (timer) window.clearInterval(timer); };
+  }, [source]);
+
+  return { rows, loading, error };
+}
+
+export function asNumber(value: unknown): number {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+export function asDate(value: unknown): number {
+  const parsed = new Date(String(value ?? "")).getTime();
+  return Number.isFinite(parsed) ? parsed : 0;
+}
