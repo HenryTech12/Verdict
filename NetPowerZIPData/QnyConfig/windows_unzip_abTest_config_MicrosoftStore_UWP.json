@@ -1,0 +1,1 @@
+{"ABGroups":[{"ABTestName":"MicrosoftVipPageTest20260520","ABGroups":["A","Contrast"],"IsOpen":1,"Weights":[{"ABGroupName":"A","Weight":"0.5"},{"ABGroupName":"Contrast","Weight":"0.5"}]}]}
