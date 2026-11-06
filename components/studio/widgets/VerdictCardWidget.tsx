@@ -6,7 +6,7 @@ import { useStudioRows, asNumber, asDate } from "./useStudioRows";
 import { pretty } from "@/lib/format";
 
 type VerdictContext = { openDispute?: (id: string) => void };
-type Row = { id?: string; customer_name?: string; amount_value?: number; currency?: string; status?: string; decision?: string; final_action?: string; win_likelihood?: number; confidence?: number; rationale?: string; created_at?: string; guardrail_rule?: string; amount_value?: number; currency?: string; status?: string };
+type Row = { id?: string; customer_name?: string; amount_value?: number; currency?: string; status?: string; decision?: string; final_action?: string; win_likelihood?: number; confidence?: number; rationale?: string; created_at?: string; guardrail_rule?: string };
 
 export default function VerdictCardWidget(params: AgWidgetParams) {
   const context = params.context as VerdictContext;

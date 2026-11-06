@@ -1,6 +1,5 @@
 "use client";
 
-import { z } from "zod";
 import { createWidgets, type AgWidgetDefinition } from "ag-studio-react";
 import type { AgDefaultRegistry, AgWidgetsConfig } from "ag-studio";
 import VerdictCardWidget from "./VerdictCardWidget";
@@ -11,14 +10,13 @@ const makeDefinition = (id: string, label: string, comp: AgWidgetDefinition["com
   id,
   label,
   comp,
-  formatShape: () => z.object({ style: z.object({ heading: z.string().optional() }).optional() }),
   form: (params) => {
     const form = params.createDefaults({ dataMappingItems: [] });
     form.items[0]?.items.push({
       type: "section",
       key: "verdictDisplaySettings",
       label: "Display settings",
-      items: [{ type: "text", id: "format.style.heading", label: "Widget heading", defaultValue: label }],
+      items: [{ type: "textfield", id: "format.style.heading", label: "Widget heading" }],
     });
     return form;
   },
