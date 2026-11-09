@@ -29,6 +29,9 @@ from app.services.metrics import impact_metrics
 from app.services.scenarios import SCENARIOS
 from app.services.serializers import dispute_detail, serialize_many
 from app.services.simulator import fire_simulated_dispute, seed_store_data
+import uuid
+import httpx
+from app.services.merchant import get_merchant
 
 
 @asynccontextmanager
@@ -118,14 +121,195 @@ async def simulate(case: str = Query(default="A", pattern="^[A-F]$"), db: Sessio
     return SimulationResponse(dispute_id=dispute_id, case=case, simulated=True)
 
 
-@app.post("/sim/store-order", status_code=201, dependencies=[Depends(require_token)])
-def seed_real_order(case: str = Query(default="B", pattern="^[A-F]$"), capture_id: str = Query(min_length=5, max_length=64), db: Session = Depends(get_db)) -> dict:
-    """Link store data (order, shipment, messages) to a REAL PayPal sandbox capture id, so a real dispute
-    on that payment finds its evidence when the webhook arrives. Used by scripts/sandbox_order.py."""
-    if db.scalar(select(Order).where(Order.paypal_capture_id == capture_id)):
-        raise RuleError("ALREADY_PROCESSED", "An order with this capture id already exists")
-    order, _ = seed_store_data(db, case, capture_id=capture_id)
-    return {"order_id": order.id, "capture_id": capture_id, "case": case}
+
+@app.post("/orders/register-capture", status_code=201, dependencies=[Depends(require_token)])
+async def register_real_capture(
+    capture_id: str = Query(min_length=5, max_length=64),
+    paypal_order_id: str = Query(min_length=5, max_length=64),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Register a real PayPal capture using verified payment data only."""
+
+    if settings.paypal_mode != "sandbox":
+        raise RuleError(
+            "PAYPAL_MODE_REQUIRED",
+            "Real capture registration requires PayPal sandbox mode.",
+            409,
+        )
+
+    existing = db.scalar(
+        select(Order).where(Order.paypal_capture_id == capture_id)
+    )
+    if existing:
+        raise RuleError(
+            "ALREADY_PROCESSED",
+            "An order with this capture ID already exists.",
+        )
+
+    adapter = get_adapter()
+
+    try:
+        capture = await adapter.get_capture(capture_id)
+    except httpx.HTTPStatusError as error:
+        raise RuleError(
+            "PAYPAL_CAPTURE_VERIFICATION_FAILED",
+            f"PayPal rejected capture verification (HTTP {error.response.status_code}).",
+            502,
+        ) from error
+    except httpx.HTTPError as error:
+        raise RuleError(
+            "PAYPAL_CAPTURE_VERIFICATION_FAILED",
+            "Could not communicate with PayPal to verify the capture.",
+            502,
+        ) from error
+
+
+    try:
+        paypal_order = await adapter.get_order(paypal_order_id)
+    except httpx.HTTPStatusError as error:
+        raise RuleError(
+            "PAYPAL_ORDER_VERIFICATION_FAILED",
+            f"PayPal rejected order verification (HTTP {error.response.status_code}).",
+            502,
+        ) from error
+    except httpx.HTTPError as error:
+        raise RuleError(
+            "PAYPAL_ORDER_VERIFICATION_FAILED",
+            "Could not communicate with PayPal to verify the checkout order.",
+            502,
+        ) from error
+
+    if paypal_order.get("id") != paypal_order_id:
+        raise RuleError(
+            "PAYPAL_ORDER_MISMATCH",
+            "PayPal returned a different checkout order.",
+            422,
+        )
+
+    if paypal_order.get("status") != "COMPLETED":
+        raise RuleError(
+            "PAYPAL_ORDER_NOT_COMPLETED",
+            "The supplied PayPal checkout order is not completed.",
+            409,
+        )
+
+    if capture.get("id") != capture_id:
+        raise RuleError(
+            "CAPTURE_ID_MISMATCH",
+            "PayPal returned a different capture ID.",
+            422,
+        )
+
+    if capture.get("status") != "COMPLETED":
+        raise RuleError(
+            "CAPTURE_NOT_COMPLETED",
+            f"PayPal capture status is {capture.get('status', 'UNKNOWN')}.",
+            409,
+        )
+
+    amount_data = capture.get("amount") or {}
+
+    try:
+        amount = Decimal(str(amount_data["value"]))
+        currency = str(amount_data["currency_code"]).upper()
+    except (KeyError, ValueError, ArithmeticError):
+        raise RuleError(
+            "INVALID_CAPTURE_AMOUNT",
+            "PayPal returned an invalid capture amount.",
+            422,
+        )
+
+    if amount <= 0 or len(currency) != 3:
+        raise RuleError(
+            "INVALID_CAPTURE_AMOUNT",
+            "PayPal returned an invalid amount or currency.",
+            422,
+        )
+
+        # Check the relationship independently using PayPal's checkout order.
+    related_ids = (
+        (capture.get("supplementary_data") or {}).get("related_ids") or {}
+    )
+    related_order_id = related_ids.get("order_id")
+
+    if related_order_id and related_order_id != paypal_order_id:
+        raise RuleError(
+            "PAYPAL_ORDER_MISMATCH",
+            "The capture does not belong to the supplied PayPal order.",
+            422,
+        )
+
+    matching_capture = None
+
+    for purchase_unit in paypal_order.get("purchase_units") or []:
+        payments = purchase_unit.get("payments") or {}
+
+        for order_capture in payments.get("captures") or []:
+            if order_capture.get("id") == capture_id:
+                matching_capture = order_capture
+                break
+
+        if matching_capture:
+            break
+
+    if not matching_capture:
+        raise RuleError(
+            "PAYPAL_ORDER_MISMATCH",
+            "The supplied PayPal order does not contain this capture.",
+            422,
+        )
+
+    if matching_capture.get("status") != "COMPLETED":
+        raise RuleError(
+            "CAPTURE_NOT_COMPLETED",
+            "The capture in the PayPal order is not completed.",
+            409,
+        )
+
+    order_capture_amount = matching_capture.get("amount") or {}
+
+    try:
+        order_amount = Decimal(str(order_capture_amount["value"]))
+        order_currency = str(order_capture_amount["currency_code"]).upper()
+    except (KeyError, ValueError, ArithmeticError):
+        raise RuleError(
+            "INVALID_CAPTURE_AMOUNT",
+            "PayPal returned invalid capture details in the checkout order.",
+            422,
+        )
+
+    if order_amount != amount or order_currency != currency:
+        raise RuleError(
+            "CAPTURE_DETAILS_MISMATCH",
+            "The capture amount or currency does not match the checkout order.",
+            422,
+        )
+
+    order = Order(
+        id=f"ORD-{uuid.uuid4().hex[:8].upper()}",
+        merchant_id=get_merchant(db).id,
+        customer_name="Unknown customer",
+        amount=amount,
+        currency=currency,
+        items_json=[],
+        ship_address="Not provided",
+        policy_accepted=False,
+        paypal_capture_id=capture_id,
+    )
+
+    db.add(order)
+    db.commit()
+
+    return {
+        "order_id": order.id,
+        "capture_id": capture_id,
+        "paypal_order_id": paypal_order_id,
+        "amount": str(amount),
+        "currency": currency,
+        "status": capture["status"],
+        "simulated": False,
+    }
+
 
 
 @app.get("/sim/cases", dependencies=[Depends(require_token)])
@@ -356,16 +540,70 @@ def reset_seed(db: Session = Depends(get_db)) -> dict:
 def analytics_rows(db: Session) -> list[dict]:
     disputes = db.scalars(select(Dispute).order_by(Dispute.created_at)).all()
     rows = []
+
     for dispute in disputes:
         order = db.get(Order, dispute.order_id)
-        assessment = db.scalar(select(Assessment).where(Assessment.dispute_id == dispute.id))
-        decision = db.scalar(select(Decision).where(Decision.dispute_id == dispute.id))
-        deadline = dispute.deadline.replace(tzinfo=timezone.utc) if dispute.deadline.tzinfo is None else dispute.deadline
-        hours = (deadline - datetime.now(timezone.utc)).total_seconds() / 3600
-        created = dispute.created_at.date().isoformat()
-        rows.append({"id": dispute.id, "paypal_dispute_id": dispute.paypal_dispute_id, "customer_name": order.customer_name, "amount_value": float(dispute.amount), "currency": dispute.currency, "reason": dispute.reason, "status": dispute.status, "decision": decision.policy_decision if decision else None, "final_action": decision.final_action if decision else None, "win_likelihood": assessment.win_likelihood if assessment else 0, "confidence": assessment.confidence if assessment else 0, "checklist_score": assessment.checklist_score if assessment else 0, "rationale": assessment.rationale if assessment else None, "llm_error": assessment.llm_error if assessment else None, "has_conflict": bool(assessment and assessment.conflicts_json), "conflict_summary": (assessment.conflicts_json[0] if assessment and assessment.conflicts_json else None), "guardrail_rule": decision.guardrail_rule if decision else None, "simulated": dispute.simulated, "created_at": dispute.created_at, "deadline": deadline, "hours_to_deadline": round(hours, 2), "resolved_at": dispute.created_at if dispute.status in ("REFUNDED", "EVIDENCE_SUBMITTED", "RESOLVED") else None, "day": created, "week": f"{dispute.created_at.isocalendar().year}-W{dispute.created_at.isocalendar().week:02d}"})
-    return rows
 
+        # Never expose a simulated order through a real dispute, or vice versa.
+        if order and order.simulated != dispute.simulated:
+            order = None
+
+        assessment = db.scalar(
+            select(Assessment).where(Assessment.dispute_id == dispute.id)
+        )
+        decision = db.scalar(
+            select(Decision).where(Decision.dispute_id == dispute.id)
+        )
+
+        deadline = (
+            dispute.deadline.replace(tzinfo=timezone.utc)
+            if dispute.deadline and dispute.deadline.tzinfo is None
+            else dispute.deadline
+        )
+
+        hours = (
+            (deadline - datetime.now(timezone.utc)).total_seconds() / 3600
+            if deadline is not None
+            else None
+        )
+
+        created = dispute.created_at.date().isoformat()
+
+        rows.append({
+            "id": dispute.id,
+            "paypal_dispute_id": dispute.paypal_dispute_id,
+            "customer_name": order.customer_name if order else "Unknown customer",
+            "amount_value": float(dispute.amount),
+            "currency": dispute.currency,
+            "reason": dispute.reason,
+            "status": dispute.status,
+            "decision": decision.policy_decision if decision else None,
+            "final_action": decision.final_action if decision else None,
+            "win_likelihood": assessment.win_likelihood if assessment else 0,
+            "confidence": assessment.confidence if assessment else 0,
+            "checklist_score": assessment.checklist_score if assessment else 0,
+            "rationale": assessment.rationale if assessment else None,
+            "llm_error": assessment.llm_error if assessment else None,
+            "has_conflict": bool(assessment and assessment.conflicts_json),
+            "conflict_summary": (
+                assessment.conflicts_json[0]
+                if assessment and assessment.conflicts_json
+                else None
+            ),
+            "guardrail_rule": decision.guardrail_rule if decision else None,
+            "simulated": dispute.simulated,
+            "created_at": dispute.created_at,
+            "deadline": deadline,
+            "hours_to_deadline": round(hours, 2) if hours is not None else None,
+            "resolved_at": dispute.resolved_at,
+            "day": created,
+            "week": (
+                f"{dispute.created_at.isocalendar().year}"
+                f"-W{dispute.created_at.isocalendar().week:02d}"
+            ),
+        })
+
+    return rows
 
 @app.get("/analytics/disputes", dependencies=[Depends(require_token)])
 def analytics_disputes(db: Session = Depends(get_db)) -> list[dict]:

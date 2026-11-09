@@ -62,11 +62,41 @@ async def run_assessment(evidence: CaseEvidence, context: dict[str, object]) -> 
     return result, output, llm_error
 
 
-def decide_and_guard(result: dict, amount: Decimal, deadline_expired: bool, thr: dict[str, object], missing_evidence: bool = False) -> dict:
-    recommendation, rule_fired = choose_policy_with_rule(result["win_likelihood"], result["confidence"], float(thr["fight_min_win_likelihood"]), float(thr["refund_max_win_likelihood"]), float(thr["min_confidence"]))
-    final_action, guardrail_rule = apply_guardrails(recommendation, amount, deadline_expired, result["confidence"], result["conflicts"], Decimal(str(thr["approval_threshold"])), Decimal(str(thr["auto_refund_cap"])), float(thr["min_confidence"]), missing_evidence)
-    return {"recommendation": recommendation, "rule_fired": rule_fired, "final_action": final_action, "guardrail_rule": guardrail_rule}
+def decide_and_guard(
+    result: dict,
+    amount: Decimal,
+    deadline_expired: bool,
+    thr: dict[str, object],
+    missing_evidence: bool = False,
+    missing_deadline: bool = False,
+) -> dict:
+    recommendation, rule_fired = choose_policy_with_rule(
+        result["win_likelihood"],
+        result["confidence"],
+        float(thr["fight_min_win_likelihood"]),
+        float(thr["refund_max_win_likelihood"]),
+        float(thr["min_confidence"]),
+    )
 
+    final_action, guardrail_rule = apply_guardrails(
+        recommendation,
+        amount,
+        deadline_expired,
+        result["confidence"],
+        result["conflicts"],
+        Decimal(str(thr["approval_threshold"])),
+        Decimal(str(thr["auto_refund_cap"])),
+        float(thr["min_confidence"]),
+        missing_evidence,
+        missing_deadline,
+    )
+
+    return {
+        "recommendation": recommendation,
+        "rule_fired": rule_fired,
+        "final_action": final_action,
+        "guardrail_rule": guardrail_rule,
+    }
 
 async def evaluate_case(evidence: CaseEvidence, amount: Decimal, deadline_expired: bool, thresholds_: dict[str, object], context: dict[str, object] | None = None, missing_evidence: bool = False) -> dict:
     context = context or {"checks": {"tracking_delivered": evidence.delivered, "address_match": evidence.address_match, "delivery_proof": evidence.proof, "customer_communication": evidence.communication_strength > 0, "policy_accepted": evidence.policy_accepted}, "dispute": {"reason": evidence.reason}}
@@ -102,31 +132,47 @@ def _transient(error: Exception) -> bool:
     return isinstance(error, (httpx.TimeoutException, httpx.TransportError))
 
 
-async def execute_action(dispute: Dispute, action: str, order: Order | None, shipment: Shipment | None, packet: str) -> dict:
-    """Run FIGHT or REFUND through the configured adapter. Transient failures retry (max 2) and then raise
-    ActionFailed; sandbox gaps (unsupported call, 4xx) fall back to the labeled mock."""
+
+async def execute_action(
+    dispute: Dispute,
+    action: str,
+    order: Order | None,
+    shipment: Shipment | None,
+    packet: str,
+) -> dict:
+    """Execute an action without disguising real PayPal failures as mock successes."""
     request_id = f"{dispute.id}:{action}"
     capture_id = order.paypal_capture_id if order else ""
-    tracking = {"carrier_name": "OTHER", "tracking_number": shipment.tracking} if shipment else None
+    tracking = (
+        {"carrier_name": "OTHER", "tracking_number": shipment.tracking}
+        if shipment else None
+    )
     started = time.perf_counter()
 
-    # Simulator cases deliberately use synthetic PayPal IDs. Never send those IDs to
-    # PayPal's real sandbox: doing so creates noisy 400/404 events and can hide routing bugs.
-    # The persisted dispute flag is authoritative; the prefixes are a defensive backstop
-    # for older/demo records created before that flag was consistently populated.
+    # Synthetic simulator disputes must never reach the real PayPal API.
     synthetic_paypal_id = (
         bool(getattr(dispute, "simulated", False))
         or str(getattr(dispute, "paypal_dispute_id", "")).startswith("SIM-")
         or str(capture_id).startswith("SIM-CAP-")
     )
+
     if synthetic_paypal_id:
         fallback = MockPayPalAdapter()
+
         mock = await (
             fallback.provide_evidence(dispute.paypal_dispute_id, packet, tracking)
             if action == "FIGHT"
-            else fallback.refund_capture(capture_id, dispute.amount, dispute.currency, "SIMULATED demo action", request_id)
+            else fallback.refund_capture(
+                capture_id,
+                dispute.amount,
+                dispute.currency,
+                "SIMULATED demo action",
+                request_id,
+            )
         )
+
         mock["simulated"] = True
+
         return {
             "action": action,
             "simulated": True,
@@ -136,36 +182,79 @@ async def execute_action(dispute: Dispute, action: str, order: Order | None, shi
             "attempts": 0,
         }
 
+    # Real disputes must use the configured adapter.
     adapter = get_adapter()
-    last_error: Exception | None = None
+
     for attempt in range(settings.action_max_retries + 1):
         try:
             if action == "FIGHT":
-                result = await adapter.provide_evidence(dispute.paypal_dispute_id, packet, tracking)
+                result = await adapter.provide_evidence(
+                    dispute.paypal_dispute_id,
+                    packet,
+                    tracking,
+                )
             else:
-                result = await adapter.refund_capture(capture_id, dispute.amount, dispute.currency, "Verdict automated dispute resolution", request_id)
+                result = await adapter.refund_capture(
+                    capture_id,
+                    dispute.amount,
+                    dispute.currency,
+                    "Verdict automated dispute resolution",
+                    request_id,
+                )
+
             result["simulated"] = bool(adapter.simulated)
-            result["duration_ms"] = round((time.perf_counter() - started) * 1000)
-            return {"action": action, "simulated": result["simulated"], "result": result, "duration_ms": result["duration_ms"], "attempts": attempt + 1}
+            duration = round((time.perf_counter() - started) * 1000)
+            result["duration_ms"] = duration
+
+            return {
+                "action": action,
+                "simulated": result["simulated"],
+                "result": result,
+                "duration_ms": duration,
+                "attempts": attempt + 1,
+            }
+
         except UnsupportedInSandbox as error:
-            last_error = error
-            break
+            raise ActionFailed(
+                f"PayPal {action} is unsupported for this dispute: {error}"
+            ) from error
+
         except httpx.HTTPError as error:
-            last_error = error
             if _transient(error) and attempt < settings.action_max_retries:
                 await asyncio.sleep(0.4 * (attempt + 1))
                 continue
-            if _transient(error):
-                raise ActionFailed(f"PayPal {action} failed after {attempt + 1} attempts: {error}") from error
-            break
-    fallback = MockPayPalAdapter()
-    mock = await (fallback.provide_evidence(dispute.paypal_dispute_id, packet, tracking) if action == "FIGHT" else fallback.refund_capture(capture_id, dispute.amount, dispute.currency, "SIMULATED sandbox fallback", request_id))
-    mock["simulated"] = True
-    return {"action": action, "simulated": True, "fallback_reason": f"Sandbox could not complete this call, used labeled mock: {last_error}", "result": mock, "duration_ms": round((time.perf_counter() - started) * 1000), "attempts": 1}
+
+            raise ActionFailed(
+                f"PayPal {action} failed after {attempt + 1} attempt(s): {error}"
+            ) from error
+
+    raise ActionFailed(f"PayPal {action} failed unexpectedly.")
 
 
 async def perform_action(db: Session, dispute: Dispute, action: str, packet: str) -> dict:
     """Exactly-once per (dispute, action): the idempotency key is claimed before the adapter is called."""
+
+    # Never submit evidence without a verified response deadline.
+    if action == "FIGHT":
+        if dispute.deadline is None:
+            raise RuleError(
+                "GUARDRAIL_BLOCKED",
+                "Cannot submit evidence: PayPal has not provided a response deadline.",
+            )
+
+        if is_expired(dispute.deadline):
+            raise RuleError(
+                "GUARDRAIL_BLOCKED",
+                "Cannot submit evidence: dispute deadline has expired.",
+            )
+
+        # Never submit evidence when required supporting records are missing.
+        gathered = gather(db, dispute, "")
+        if gathered.missing_evidence:
+            raise RuleError(
+                "GUARDRAIL_BLOCKED",
+                "Cannot submit evidence: required order or shipment evidence is missing or unverified.",
+            )
     key = f"{dispute.id}:{action}"
     claim = Action(dispute_id=dispute.id, action_type=action, idempotency_key=key, result_json={"status": "PENDING"}, simulated=True)
     db.add(claim)
@@ -238,8 +327,26 @@ async def _run(db: Session, dispute_id: str) -> None:
     # ASSESS
     started = time.perf_counter()
     result, output, llm_error = await run_assessment(gathered.evidence, gathered.context)
-    order, shipment = db.get(Order, dispute.order_id), db.get(Shipment, dispute.order_id)
-    messages = list(db.scalars(select(Message).where(Message.order_id == dispute.order_id).order_by(Message.ts, Message.id)).all())
+    order = db.get(Order, dispute.order_id)
+
+    # Never reintroduce simulated records after evidence gathering filtered them.
+    if order is not None and order.simulated != dispute.simulated:
+        order = None
+
+    shipment = db.get(Shipment, order.id) if order else None
+
+    messages = (
+        list(
+            db.scalars(
+                select(Message)
+                .where(Message.order_id == order.id)
+                .order_by(Message.ts, Message.id)
+            ).all()
+        )
+        if order
+        else []
+    )
+
     narrative = output.packet_draft if output else ""
     rationale = output.rationale if output else "The model assessment failed after retries, so the deterministic checklist stands alone and the case needs merchant review."
     assessment = Assessment(dispute_id=dispute.id, evidence_json=result["evidence_items"], conflicts_json=result["conflicts"], checklist_score=result["checklist_score"], win_likelihood=result["win_likelihood"], confidence=result["confidence"], recommended="ESCALATE", rationale=rationale, packet_draft="", llm_error=llm_error, token_usage=output.token_usage if output else None)
@@ -252,8 +359,16 @@ async def _run(db: Session, dispute_id: str) -> None:
 
     # DECIDE + GUARD
     expired = is_expired(dispute.deadline)
+    missing_deadline = dispute.deadline is None
     started = time.perf_counter()
-    decision = decide_and_guard(result, dispute.amount, expired, thr, gathered.missing_evidence)
+    decision = decide_and_guard(
+                    result, 
+                    dispute.amount, 
+                    expired, 
+                    thr, 
+                    gathered.missing_evidence, 
+                    missing_deadline,
+                )
     assessment.recommended = decision["recommendation"]
     db.add(Decision(dispute_id=dispute.id, policy_decision=decision["recommendation"], rule_fired=decision["rule_fired"], guardrail_rule=decision["guardrail_rule"], final_action=decision["final_action"]))
     db.commit()
@@ -297,11 +412,23 @@ async def approve(db: Session, dispute_id: str, note: str | None = None, decided
     approval = db.scalar(select(Approval).where(Approval.dispute_id == dispute_id))
     if not dispute or not approval or approval.status != "PENDING":
         raise RuleError("ALREADY_PROCESSED", "Approval is no longer pending")
-    if is_expired(dispute.deadline):
-        raise RuleError("GUARDRAIL_BLOCKED", "Dispute deadline has expired")
+
     action = override_action or approval.requested_action
+
     if action not in FINAL_STATUS:
         raise RuleError("INVALID_STATE", f"Cannot execute {action}", 422)
+
+    # Missing PayPal deadline blocks evidence submission, not refunds.
+    if action == "FIGHT" and dispute.deadline is None:
+        raise RuleError(
+            "GUARDRAIL_BLOCKED",
+            "Cannot approve FIGHT: PayPal has not provided a response deadline.",
+        )
+
+    # An expired dispute cannot receive either action.
+    if is_expired(dispute.deadline):
+        raise RuleError("GUARDRAIL_BLOCKED", "Dispute deadline has expired")
+    
     claimed = db.execute(update(Approval).where(Approval.id == approval.id, Approval.status == "PENDING").values(status="APPROVED", decided_at=datetime.now(timezone.utc), decided_by=decided_by, note=note))
     db.commit()
     if claimed.rowcount != 1:
