@@ -10,3 +10,9 @@
 
 - The main dispute table uses AG Grid **Community**. Master/detail and row grouping are Enterprise features, so the expandable reasoning row is implemented with Community full-width rows, and status "grouping" is implemented as filter chips.
 - Package versions are pinned by `package-lock.json` (`ag-studio` and `ag-studio-react` 3.0.0, `ag-grid-community` and `ag-grid-react` 36.2.0). Use `npm ci`, not `npm install`, because newer minor versions change the Studio types.
+
+## AG Studio data model
+
+* The lockfile pins `ag-studio` and `ag-studio-react` 3.0.0, where a relationship names its ends as `{ tableId, fieldId }` objects. Newer docs show the string form (`'order_items.product_id'`); if you upgrade, adjust `relationships` in `components/studio/model.ts`.
+* Saved dashboards use the browser key `verdict.studio.state.v2`. Bump the version in `components/studio/state.ts` whenever the data model or default layout changes, so stale layouts are ignored.
+* The dashboard opens in edit mode so the AI chat panel is visible. Whether the chat also appears in view mode has not been verified.

@@ -10,7 +10,6 @@ export function useStudioRows(source: "disputes" | "guardrails") {
 
   useEffect(() => {
     let active = true;
-    let timer: number | undefined;
     const load = async () => {
       try {
         const next = await fetchStudioSource(source);
@@ -22,8 +21,10 @@ export function useStudioRows(source: "disputes" | "guardrails") {
       }
     };
     void load();
-    timer = window.setInterval(() => void load(), 15000);
-    return () => { active = false; if (timer) window.clearInterval(timer); };
+    const timer = window.setInterval(() => void load(), 15000);
+    const onRefresh = () => void load();
+    window.addEventListener("verdict:analytics-refresh", onRefresh);
+    return () => { active = false; window.clearInterval(timer); window.removeEventListener("verdict:analytics-refresh", onRefresh); };
   }, [source]);
 
   return { rows, loading, error };

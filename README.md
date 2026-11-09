@@ -76,6 +76,17 @@ Full policy details: [docs/DECISION_POLICY.md](docs/DECISION_POLICY.md).
 * Approval queue, merchant settings (caps, thresholds, policy text), evidence packet download, scenario lab, and AG Studio analytics pages.
 
 
+### AG Studio analytics
+
+The analytics section is an AG Studio dashboard built on the same data the agent produces (`/analytics/*`).
+
+* **Typed data model** (`components/studio/model.ts`): every field has a name and format (currency, percentage, date and so on), so charts, filters and the AI analyst use proper labels instead of guessed types.
+* **Relationships**: evidence checks, audit steps and guardrail events each belong to one dispute, so a single widget can mix them, for example average evidence strength by dispute status or average pipeline time by decision.
+* **Calculated fields**: *Amount at risk* (open cases only) and *Deadline window* (under 24 hours, 1 to 3 days, over 3 days, closed).
+* **Three pages** (Overview, Risk and guardrails, Case explorer) with status and decision filters that cross-filter the other widgets, plus three custom widgets (Latest Verdict, Deadline Risk, Guardrail Activity).
+* **Self-serve editing**: use *Edit dashboard* to add or rearrange widgets. Changes are saved in your browser and *Reset layout* restores the default. The default layout and field references are checked by `components/studio/model.test.ts`.
+* **AI analyst** (when `LLM_PROVIDER=groq`): ask questions in plain language and Studio builds widgets. It is read-only by design: it has no tool that approves, refunds or submits evidence.
+
 ### PayPal sandbox checkout
 
 The `/payments` page provides a separate PayPal Checkout sandbox flow for creating and capturing test orders. It is not required for dispute processing. Configure `PAYPAL_MODE=sandbox`, `PAYPAL_CLIENT_ID`, and `PAYPAL_CLIENT_SECRET` on the backend. The browser receives only the public sandbox Client ID; the Client Secret remains server-side. Use PayPal sandbox buyer accounts only.
@@ -122,6 +133,15 @@ docs/                   PAYPAL_CALLS.md, DECISION_POLICY.md, SUBMISSION.md, ASSU
 `render.yaml` defines two Docker web services. After the first deploy set `NEXT_PUBLIC_API_URL` on `verdict-web`
 and `FRONTEND_ORIGIN` on `verdict-api` to each other's public URLs, then redeploy. The database is SQLite on the
 instance's ephemeral disk and is reseeded on start, which is fine for a demo.
+
+**Set your own tokens.** `render.yaml` does not ship default tokens. Set `API_TOKEN` on `verdict-api` and
+`NEXT_PUBLIC_API_TOKEN` on `verdict-web` to the **same** long random string (for example `openssl rand -hex 24`), and set
+`WEBHOOK_SIM_SECRET` to a different random string. `NEXT_PUBLIC_*` values are baked in at build time, so redeploy
+`verdict-web` after changing it. The browser token is visible to anyone who opens the site, which is acceptable for a
+judged demo but means you should not reuse it anywhere else.
+
+**PayPal `invalid_client`?** Run `python scripts/check_paypal_credentials.py` from `backend/` and read
+[docs/PAYPAL_CREDENTIALS.md](docs/PAYPAL_CREDENTIALS.md).
 
 ## License
 

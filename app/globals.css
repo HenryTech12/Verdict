@@ -76,7 +76,7 @@ nav { display: grid; gap: 5px; }.nav-item { width: 100%; border: 0; background: 
 .studio-case-row b, .studio-case-row small { display: block; }
 .studio-case-row b { font: 600 11px ui-monospace, monospace; }
 .studio-case-row small { color: var(--muted); font-size: 10px; margin-top: 3px; }
-.studio-risk-time { color: var(--danger); font-size: 11px; white-space: nowrap; }
+.studio-risk-time { font-size: 11px; white-space: nowrap; } .studio-risk-time.urgent { color: var(--danger); } .studio-risk-time.soon { color: var(--amber); }
 .studio-rule { display: grid; gap: 5px; }
 .studio-rule > div:first-child { display: flex; justify-content: space-between; gap: 10px; font-size: 11px; text-transform: capitalize; }
 .studio-rule > div:first-child span { color: var(--muted); }
@@ -124,3 +124,11 @@ nav { display: grid; gap: 5px; }.nav-item { width: 100%; border: 0; background: 
 .payments-help p { background: color-mix(in srgb, var(--amber) 9%, var(--surface)); border-radius: 7px; padding: 12px; color: var(--muted); font-size: 11px; line-height: 1.55; }
 .payments-help a { display: inline-flex; align-items: center; gap: 6px; color: var(--blue); font-size: 11px; text-decoration: none; }
 @media (max-width: 900px) { .payments-grid { grid-template-columns: 1fr; } .payments-heading { flex-direction: column; } }
+
+/* AG Studio toolbar: page tabs, edit/view toggle, reset */
+.studio-toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 14px; border-bottom: 1px solid var(--border); background: var(--surface); }
+.studio-pages, .studio-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.studio-action { border: 1px solid var(--border); background: var(--surface); color: var(--foreground); border-radius: 8px; padding: 6px 12px; font-size: 12px; font-weight: 600; cursor: pointer; }
+.studio-action:hover { border-color: var(--blue); }
+.studio-action:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+.studio-action[aria-selected="true"], .studio-action[aria-pressed="true"] { background: var(--blue); border-color: var(--blue); color: #fff; }

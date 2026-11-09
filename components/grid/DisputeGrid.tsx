@@ -12,7 +12,7 @@ import { STATUSES, STATUS_LABEL, money, pretty, sortDisputes, timeLeft } from "@
 ModuleRegistry.registerModules([AllCommunityModule]);
 
 const theme = themeQuartz.withPart(colorSchemeVariable).withParams({ fontFamily: "inherit", accentColor: "#0070e0", headerFontSize: 12, fontSize: 14, wrapperBorderRadius: 8 });
-const DETAIL_HEIGHT = 470, ROW_HEIGHT = 58;
+const DETAIL_HEIGHT = 560, ROW_HEIGHT = 58;
 
 function useNow(intervalMs = 30000) {
   const [now, setNow] = useState(() => Date.now());
@@ -50,13 +50,18 @@ function StatusCell({ value }: CustomCellRendererProps<GridRow>) {
 }
 
 const columns: ColDef<GridRow>[] = [
-  { field: "id", headerName: "Dispute", flex: 1.05, minWidth: 132, cellRenderer: IdCell },
+  { field: "id", headerName: "Dispute", flex: 1.15, minWidth: 200, cellRenderer: IdCell },
   { field: "customer_name", headerName: "Customer", flex: 1.2, minWidth: 142, cellRenderer: ({ data }: CustomCellRendererProps<GridRow>) => <span><strong>{data!.customer_name}</strong><small className="sub">{data!.paypal_dispute_id}</small></span> },
   { field: "amount", headerName: "Amount", flex: 0.72, minWidth: 92, type: "rightAligned", valueGetter: (p) => Number(p.data?.amount), valueFormatter: (p) => money(p.value, p.data?.currency) },
   { field: "reason", headerName: "Reason", flex: 1.05, minWidth: 128, valueFormatter: (p) => pretty(p.value) },
-  { field: "deadline", headerName: "Deadline", flex: 0.95, minWidth: 126, cellRenderer: DeadlineCell, comparator: (a: string, b: string) => new Date(a).getTime() - new Date(b).getTime() },
+  { field: "deadline", headerName: "Deadline", flex: 0.95, minWidth: 126, // The value includes the status so the cell redraws (and shows "Closed") when a case is resolved.
+    valueGetter: (p) => `${p.data?.deadline ?? ""}|${p.data?.status ?? ""}`, cellRenderer: DeadlineCell,
+    comparator: (a: string, b: string) => new Date(a.split("|")[0]).getTime() - new Date(b.split("|")[0]).getTime() },
   { field: "win_likelihood", headerName: "Win likelihood", flex: 1.05, minWidth: 142, cellRenderer: LikelihoodCell, comparator: (a, b) => (a ?? -1) - (b ?? -1) },
-  { field: "decision", headerName: "Decision", flex: 1.0, minWidth: 132, cellRenderer: DecisionCell },
+  { field: "decision", headerName: "Decision", flex: 1.0, minWidth: 132,
+    // Include policy decision, guardrail rule and status so the badge redraws when any of them changes.
+    valueGetter: (p) => [p.data?.decision ?? "", p.data?.policy_decision ?? "", p.data?.guardrail_rule ?? "", p.data?.status ?? ""].join("|"),
+    comparator: (a: string, b: string) => a.split("|")[0].localeCompare(b.split("|")[0]), cellRenderer: DecisionCell },
   { field: "status", headerName: "Status", flex: 1.0, minWidth: 132, cellRenderer: StatusCell },
 ];
 
