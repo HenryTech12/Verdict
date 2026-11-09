@@ -1,6 +1,6 @@
 from decimal import Decimal
 
-from pydantic import model_validator
+from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 SANDBOX_URL = "https://api-m.sandbox.paypal.com"
@@ -42,6 +42,14 @@ class Settings(BaseSettings):
     modeled_minutes_per_case: int = 25
 
     model_config = SettingsConfigDict(env_file=("../.env", ".env"), extra="ignore")
+
+    @field_validator("paypal_client_id", "paypal_client_secret", "paypal_webhook_id", "groq_api_key", mode="before")
+    @classmethod
+    def clean_pasted_secret(cls, value: object) -> object:
+        """Hosts and .env files often add spaces, quotes or a trailing newline to pasted keys."""
+        if isinstance(value, str):
+            return value.strip().strip("\"'").strip() or None
+        return value
 
     @model_validator(mode="after")
     def validate_integrations(self) -> "Settings":

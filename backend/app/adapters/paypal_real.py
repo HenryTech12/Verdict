@@ -11,6 +11,26 @@ from app.config import SANDBOX_URL, settings
 from app.adapters.paypal_base import UnsupportedInSandbox
 
 
+class PayPalAuthError(httpx.HTTPStatusError):
+    """OAuth token request rejected. Subclassing HTTPStatusError keeps the pipeline's classification:
+    a 401 is not transient, so the call falls back to the labeled mock with this message as the reason."""
+
+
+def auth_hint(response: httpx.Response) -> str:
+    """Human-readable explanation of a rejected OAuth call. Never includes credentials."""
+    try:
+        body = response.json()
+    except ValueError:
+        body = {}
+    code = str(body.get("error") or f"HTTP {response.status_code}")
+    description = str(body.get("error_description") or "").strip()
+    message = f"PayPal OAuth rejected the sandbox credentials ({code}{': ' + description if description else ''})."
+    if code == "invalid_client":
+        message += (" Use the Client ID and Secret of the SAME app under the SANDBOX tab (not Live), "
+                    "with no spaces, quotes or line breaks, and re-check them in the host's environment settings.")
+    return message
+
+
 class SandboxPayPalAdapter:
     simulated = False
 
@@ -24,7 +44,8 @@ class SandboxPayPalAdapter:
             return self._token
         async with httpx.AsyncClient(timeout=30) as client:
             response = await client.post(f"{SANDBOX_URL}/v1/oauth2/token", auth=(settings.paypal_client_id or "", settings.paypal_client_secret or ""), data={"grant_type": "client_credentials"})
-            response.raise_for_status()
+            if response.status_code >= 400:
+                raise PayPalAuthError(auth_hint(response), request=response.request, response=response)
             self._token = response.json()["access_token"]
             return self._token
 

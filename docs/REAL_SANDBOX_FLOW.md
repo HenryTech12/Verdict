@@ -10,6 +10,7 @@ then Sandbox accounts.
 
 ## Steps (run from `backend/`, with PayPal credentials in `.env`)
 
+0. **Confirm your credentials work** (fixes `invalid_client`): `python scripts/check_paypal_credentials.py`. See `docs/PAYPAL_CREDENTIALS.md`.
 1. **Create a real sandbox order**
    ```bash
    python scripts/sandbox_order.py create --case B

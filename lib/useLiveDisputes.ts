@@ -32,7 +32,7 @@ export function useLiveDisputes() {
   useEffect(() => {
     void refresh();
     void api.getHealth().then(setHealth).catch(() => undefined);
-    const debounced = () => { window.clearTimeout(timer.current); timer.current = window.setTimeout(() => void refresh(), 200); };
+    const debounced = () => { window.clearTimeout(timer.current); timer.current = window.setTimeout(() => { void refresh(); window.dispatchEvent(new Event("verdict:analytics-refresh")); }, 200); };
     const source = new EventSource(streamUrl());
     source.onopen = () => setConnected(true);
     source.onerror = () => setConnected(false);
