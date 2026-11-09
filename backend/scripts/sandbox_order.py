@@ -53,10 +53,21 @@ def capture(args: argparse.Namespace) -> None:
             sys.exit(f"Capture failed ({response.status_code}). Did you approve the order as the buyer? {response.text[:300]}")
         capture_id = response.json()["purchase_units"][0]["payments"]["captures"][0]["id"]
         print(f"Real capture id: {capture_id}")
-        seeded = client.post(f"{args.api.rstrip('/')}/sim/store-order", params={"case": args.case, "capture_id": capture_id}, headers={"Authorization": f"Bearer {args.token}"})
+        seeded = client.post(f"{args.api.rstrip('/')}/orders/register-capture",
+                                params={
+                                    "capture_id": capture_id,
+                                    "paypal_order_id": args.order_id,
+                                },
+                                headers={"Authorization": f"Bearer {args.token}"},
+        )
         if seeded.status_code != 201:
             sys.exit(f"Verdict store seeding failed: {seeded.status_code} {seeded.text}")
-        print(f"Verdict now has matching store data ({seeded.json()['order_id']}, case {args.case}).")
+        data = seeded.json()
+        print(
+            f"Verified PayPal capture registered: {data['order_id']} "
+            f"({data['currency']} {data['amount']})."
+        )
+        print("No shipping, customer or product evidence was fabricated.")
     print("Next: as the sandbox buyer, report 'item not received' on this payment in Resolution Center, then watch the dashboard.")
 
 

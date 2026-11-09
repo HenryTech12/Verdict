@@ -35,7 +35,7 @@ class DisputeListItem(BaseModel):
     currency: str
     reason: str
     status: str
-    deadline: datetime
+    deadline: datetime | None = None
     win_likelihood: float | None = None
     confidence: float | None = None
     decision: str | None = None

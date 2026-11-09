@@ -2,6 +2,7 @@
 import json
 import time
 from decimal import Decimal
+from xmlrpc import client
 
 import pytest
 from sqlalchemy import func, select
@@ -9,7 +10,9 @@ from sqlalchemy import func, select
 from app.adapters.paypal_mock import SIGNATURE_HEADER, sign_payload
 from app.db import SessionLocal
 from app.llm.base import AssessmentOutput
-from app.models import Action, AuditLog, Dispute
+from app.models import Action, AuditLog, Dispute, Message, Order, Shipment
+from app import main
+from app.config import settings
 from app.services import pipeline
 from app.services.scenarios import SCENARIOS
 from app.services.simulator import build_payload, seed_store_data
@@ -163,12 +166,50 @@ def test_webhook_is_idempotent_by_event_and_dispute_id(client):
 def test_webhook_updated_and_resolved_events(client):
     with SessionLocal() as db:
         order, paypal_id = seed_store_data(db, "C")
+
     created = build_payload("C", order, paypal_id)
     dispute_id = signed_post(client, created).json()["dispute_id"]
-    resolved = {**created, "id": "WH-RESOLVED", "event_type": "CUSTOMER.DISPUTE.RESOLVED", "resource": {**created["resource"], "dispute_outcome": {"outcome_code": "RESOLVED_SELLER_FAVOUR"}}}
-    assert signed_post(client, resolved).status_code == 200
-    assert client.get(f"/disputes/{dispute_id}").json()["status"] == "RESOLVED"
 
+    # First, verify an ordinary PayPal update does not overwrite
+    # Verdict's internal workflow status.
+    updated = {
+        **created,
+        "id": "WH-UPDATED",
+        "event_type": "CUSTOMER.DISPUTE.UPDATED",
+        "resource": {
+            **created["resource"],
+            "status": "WAITING_FOR_BUYER_RESPONSE",
+        },
+    }
+
+    assert signed_post(client, updated).status_code == 200
+
+    with SessionLocal() as db:
+        dispute = db.get(Dispute, dispute_id)
+        assert dispute.paypal_status == "WAITING_FOR_BUYER_RESPONSE"
+
+    # Then verify a resolved event updates PayPal's status
+    # without overwriting Verdict's internal status.
+    resolved = {
+        **created,
+        "id": "WH-RESOLVED",
+        "event_type": "CUSTOMER.DISPUTE.RESOLVED",
+        "resource": {
+            **created["resource"],
+            "status": "RESOLVED",
+            "dispute_outcome": {
+                "outcome_code": "RESOLVED_SELLER_FAVOUR"
+            },
+        },
+    }
+
+    assert signed_post(client, resolved).status_code == 200
+
+    with SessionLocal() as db:
+        dispute = db.get(Dispute, dispute_id)
+        assert dispute.status == "AWAITING_APPROVAL"
+        assert dispute.paypal_status == "RESOLVED"
+        assert dispute.resolved_at is not None
 
 def test_unknown_order_escalates_for_missing_evidence(client):
     payload = {"id": "WH-REAL-1", "event_type": "CUSTOMER.DISPUTE.CREATED", "resource": {"dispute_id": "PP-D-9999", "reason": "MERCHANDISE_OR_SERVICE_NOT_RECEIVED", "dispute_amount": {"value": "60.00", "currency_code": "USD"}, "disputed_transactions": [{"seller_transaction_id": "NOT-IN-OUR-DB"}]}}
@@ -177,6 +218,58 @@ def test_unknown_order_escalates_for_missing_evidence(client):
     assert detail["status"] == "AWAITING_APPROVAL" and detail["guardrail_rule"] == "MISSING_EVIDENCE"
     assert detail["simulated"] is False
 
+def test_missing_evidence_blocks_fight_approval_but_allows_refund(client):
+    payload = {
+        "id": "WH-REAL-APPROVAL-1",
+        "event_type": "CUSTOMER.DISPUTE.CREATED",
+        "resource": {
+            "dispute_id": "PP-D-APPROVAL-1",
+            "reason": "MERCHANDISE_OR_SERVICE_NOT_RECEIVED",
+            "dispute_amount": {
+                "value": "60.00",
+                "currency_code": "USD",
+            },
+            "disputed_transactions": [
+                {"seller_transaction_id": "UNKNOWN-CAPTURE-APPROVAL"}
+            ],
+        },
+    }
+
+    response = signed_post(client, payload)
+    assert response.status_code == 200
+
+    dispute = client.get("/disputes").json()["items"][0]
+    dispute_id = dispute["id"]
+
+    detail = client.get(f"/disputes/{dispute_id}").json()
+
+    assert detail["status"] == "AWAITING_APPROVAL"
+    assert detail["approval"]["requested_action"] == "REFUND"
+
+    # A merchant must not override the refund recommendation with FIGHT.
+    blocked = client.post(
+        f"/disputes/{dispute_id}/approve",
+        json={"action": "FIGHT"},
+    )
+
+    assert blocked.status_code == 409
+    assert blocked.json()["error"]["code"] == "GUARDRAIL_BLOCKED"
+    assert action_count(dispute_id) == 0
+
+    # The rejected override must leave the approval pending.
+    pending = client.get(f"/disputes/{dispute_id}").json()
+    assert pending["approval"]["status"] == "PENDING"
+
+    # A refund is still permitted with merchant approval.
+    refunded = client.post(
+        f"/disputes/{dispute_id}/approve",
+        json={"action": "REFUND"},
+    )
+
+    assert refunded.status_code == 200, refunded.text
+    assert refunded.json()["status"] == "REFUNDED"
+    assert refunded.json()["approval"]["status"] == "APPROVED"
+    assert action_count(dispute_id) == 1
 
 def test_model_failure_escalates_with_error_logged(client, monkeypatch):
     class Broken:
@@ -255,12 +348,337 @@ def test_simulator_webhooks_still_work_in_sandbox_mode(client, monkeypatch):
     assert signed_post(client, payload).json()["status"] == "created"  # a valid simulator HMAC does
 
 
-def test_store_order_links_a_real_capture_id_so_a_real_dispute_finds_its_evidence(client):
-    created = client.post("/sim/store-order?case=B&capture_id=REALCAPTURE123")
-    assert created.status_code == 201
-    assert client.post("/sim/store-order?case=B&capture_id=REALCAPTURE123").status_code == 409  # no duplicates
-    payload = {"id": "WH-REAL-2", "event_type": "CUSTOMER.DISPUTE.CREATED", "resource": {"dispute_id": "PP-D-REAL-1", "reason": "MERCHANDISE_OR_SERVICE_NOT_RECEIVED", "dispute_amount": {"value": "90.00", "currency_code": "USD"}, "disputed_transactions": [{"seller_transaction_id": "REALCAPTURE123"}]}}
-    assert signed_post(client, payload).json()["status"] == "created"
-    item = client.get("/disputes").json()["items"][0]
-    assert item["simulated"] is False and item["status"] == "REFUNDED"  # same evidence as Case B: conflict, so refund
-    assert client.post("/sim/store-order?case=Z&capture_id=REALCAPTURE999").status_code == 422
+class FakeCapturePayPal:
+    simulated = False
+
+    def __init__(self, capture=None, order=None):
+        self.capture = capture or {
+            "id": "REALCAPTURE123",
+            "status": "COMPLETED",
+            "amount": {
+                "value": "90.00",
+                "currency_code": "USD",
+            },
+        }
+
+        self.order = order or {
+            "id": "PAYPAL-ORDER-123",
+            "status": "COMPLETED",
+            "purchase_units": [
+                {
+                    "payments": {
+                        "captures": [
+                            {
+                                "id": "REALCAPTURE123",
+                                "status": "COMPLETED",
+                                "amount": {
+                                    "value": "90.00",
+                                    "currency_code": "USD",
+                                },
+                            }
+                        ]
+                    }
+                }
+            ],
+        }
+
+    async def get_capture(self, capture_id):
+        return self.capture
+
+    async def get_order(self, order_id):
+        return self.order
+    
+def test_real_capture_registration_uses_only_verified_payment_data(client, monkeypatch):
+    monkeypatch.setattr(settings, "paypal_mode", "sandbox")
+    monkeypatch.setattr(
+        main, "get_adapter",
+        lambda: FakeCapturePayPal(),
+    )
+
+    response = client.post(
+        "/orders/register-capture",
+        params={
+            "capture_id": "REALCAPTURE123",
+            "paypal_order_id": "PAYPAL-ORDER-123",
+        },
+    )
+
+    assert response.status_code == 201, response.text
+    data = response.json()
+
+    assert data["capture_id"] == "REALCAPTURE123"
+    assert data["amount"] == "90.00"
+    assert data["currency"] == "USD"
+    assert data["simulated"] is False
+
+    with SessionLocal() as db:
+        order = db.get(Order, data["order_id"])
+        assert order is not None
+        assert order.customer_name == "Unknown customer"
+        assert order.amount == Decimal("90.00")
+        assert order.currency == "USD"
+        assert order.items_json == []
+        assert order.ship_address == "Not provided"
+        assert order.policy_accepted is False
+
+        assert db.get(Shipment, order.id) is None
+        assert db.scalar(
+            select(func.count()).select_from(Message).where(
+                Message.order_id == order.id
+            )
+        ) == 0
+
+    duplicate = client.post(
+        "/orders/register-capture",
+        params={
+            "capture_id": "REALCAPTURE123",
+            "paypal_order_id": "PAYPAL-ORDER-123",
+        },
+    )
+    assert duplicate.status_code == 409
+
+
+def test_real_capture_registration_rejects_uncompleted_capture(client, monkeypatch):
+    monkeypatch.setattr(settings, "paypal_mode", "sandbox")
+    monkeypatch.setattr(
+        main, "get_adapter",
+        lambda: FakeCapturePayPal({
+            "id": "REALCAPTURE123",
+            "status": "PENDING",
+            "amount": {
+                "value": "90.00",
+                "currency_code": "USD",
+            },
+        }),
+    )
+
+    response = client.post(
+        "/orders/register-capture",
+        params={
+            "capture_id": "REALCAPTURE123",
+            "paypal_order_id": "PAYPAL-ORDER-123",
+        },
+    )
+
+    assert response.status_code == 409
+    assert response.json()["error"]["code"] == "CAPTURE_NOT_COMPLETED"
+
+
+def test_real_capture_registration_rejects_wrong_paypal_order(client, monkeypatch):
+    monkeypatch.setattr(settings, "paypal_mode", "sandbox")
+    monkeypatch.setattr(
+        main, "get_adapter",
+        lambda: FakeCapturePayPal(),
+    )
+
+    response = client.post(
+        "/orders/register-capture",
+        params={
+            "capture_id": "REALCAPTURE123",
+            "paypal_order_id": "ANOTHER-ORDER",
+        },
+    )
+
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "PAYPAL_ORDER_MISMATCH"
+
+
+def test_real_capture_registration_rejects_mock_mode(client):
+    response = client.post(
+        "/orders/register-capture",
+        params={
+            "capture_id": "REALCAPTURE123",
+            "paypal_order_id": "PAYPAL-ORDER-123",
+        },
+    )
+
+    assert response.status_code == 409
+    assert response.json()["error"]["code"] == "PAYPAL_MODE_REQUIRED"
+
+def test_real_capture_registration_rejects_order_without_capture(
+    client, monkeypatch
+):
+    monkeypatch.setattr(settings, "paypal_mode", "sandbox")
+
+    fake = FakeCapturePayPal(
+        order={
+            "id": "PAYPAL-ORDER-123",
+            "status": "COMPLETED",
+            "purchase_units": [],
+        }
+    )
+
+    monkeypatch.setattr(main, "get_adapter", lambda: fake)
+
+    response = client.post(
+        "/orders/register-capture",
+        params={
+            "capture_id": "REALCAPTURE123",
+            "paypal_order_id": "PAYPAL-ORDER-123",
+        },
+    )
+
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "PAYPAL_ORDER_MISMATCH"
+
+
+def test_perform_action_blocks_fight_when_evidence_is_missing(client):
+    import asyncio
+    from app.services.errors import RuleError
+
+    payload = {
+        "id": "WH-DIRECT-GUARD-1",
+        "event_type": "CUSTOMER.DISPUTE.CREATED",
+        "resource": {
+            "dispute_id": "PP-D-DIRECT-GUARD-1",
+            "reason": "MERCHANDISE_OR_SERVICE_NOT_RECEIVED",
+            "dispute_amount": {
+                "value": "60.00",
+                "currency_code": "USD",
+            },
+            "disputed_transactions": [
+                {"seller_transaction_id": "UNKNOWN-CAPTURE-DIRECT"}
+            ],
+        },
+    }
+
+    response = signed_post(client, payload)
+    assert response.status_code == 200
+
+    with SessionLocal() as db:
+        dispute = db.scalar(
+            select(Dispute).where(
+                Dispute.paypal_dispute_id == "PP-D-DIRECT-GUARD-1"
+            )
+        )
+
+        assert dispute is not None
+        dispute_id = dispute.id
+
+        with pytest.raises(RuleError) as error:
+            asyncio.run(
+                pipeline.perform_action(db, dispute, "FIGHT", "")
+            )
+
+        assert error.value.code == "GUARDRAIL_BLOCKED"
+
+    # The blocked operation must not create an Action record.
+    assert action_count(dispute_id) == 0
+
+
+
+def test_real_dispute_does_not_expose_linked_simulated_order_or_shipment(client):
+    # Create a simulated order with synthetic customer and shipping data.
+    with SessionLocal() as db:
+        simulated_order, _ = seed_store_data(db, "A")
+        simulated_order_id = simulated_order.id
+
+    # Create a real dispute using an unrelated, unknown PayPal capture ID.
+    payload = {
+        "id": "WH-SERIALIZER-LEAK-1",
+        "event_type": "CUSTOMER.DISPUTE.CREATED",
+        "resource": {
+            "dispute_id": "PP-D-SERIALIZER-LEAK-1",
+            "reason": "MERCHANDISE_OR_SERVICE_NOT_RECEIVED",
+            "dispute_amount": {
+                "value": "60.00",
+                "currency_code": "USD",
+            },
+            "disputed_transactions": [
+                {
+                    "seller_transaction_id": "UNKNOWN-CAPTURE-SERIALIZER"
+                }
+            ],
+        },
+    }
+
+    response = signed_post(client, payload)
+    assert response.status_code == 200
+
+    # Deliberately create the bad link: real dispute -> simulated order.
+    with SessionLocal() as db:
+        dispute = db.scalar(
+            select(Dispute).where(
+                Dispute.paypal_dispute_id == "PP-D-SERIALIZER-LEAK-1"
+            )
+        )
+        assert dispute is not None
+
+        dispute.order_id = simulated_order_id
+        db.commit()
+        dispute_id = dispute.id
+
+    # The detail endpoint must hide the incompatible order and shipment.
+    detail_response = client.get(f"/disputes/{dispute_id}")
+    assert detail_response.status_code == 200
+
+    detail = detail_response.json()
+    assert detail["customer_name"] == "Unknown"
+    assert detail["order"] is None
+    assert detail["shipment"] is None
+
+    # The disputes list must also hide the simulated customer's name.
+    list_response = client.get("/disputes")
+    assert list_response.status_code == 200
+
+    items = list_response.json()["items"]
+    listed_dispute = next(
+        item for item in items if item["id"] == dispute_id
+    )
+    assert listed_dispute["customer_name"] == "Unknown"
+
+
+
+def test_perform_action_blocks_fight_when_deadline_is_missing(client):
+    import asyncio
+    from app.services.errors import RuleError
+
+    # Create a simulated dispute with valid supporting evidence.
+    with SessionLocal() as db:
+        order, paypal_id = seed_store_data(db, "A")
+
+    payload = build_payload("A", order, paypal_id)
+    response = signed_post(client, payload)
+
+    assert response.status_code == 200
+    dispute_id = response.json()["dispute_id"]
+
+    with SessionLocal() as db:
+        dispute = db.get(Dispute, dispute_id)
+
+        assert dispute is not None
+
+        # Remove the deadline while keeping the supporting evidence.
+        dispute.deadline = None
+        db.commit()
+
+        # Case A may already have an automatic FIGHT action.
+        existing_fight_count = db.scalar(
+            select(func.count())
+            .select_from(Action)
+            .where(
+                Action.dispute_id == dispute_id,
+                Action.action_type == "FIGHT",
+            )
+        )
+
+        with pytest.raises(RuleError) as error:
+            asyncio.run(
+                pipeline.perform_action(db, dispute, "FIGHT", "")
+            )
+
+        assert error.value.code == "GUARDRAIL_BLOCKED"
+        assert "response deadline" in str(error.value).lower()
+
+    # A blocked FIGHT must not create another FIGHT Action record.
+    with SessionLocal() as db:
+        final_fight_count = db.scalar(
+            select(func.count())
+            .select_from(Action)
+            .where(
+                Action.dispute_id == dispute_id,
+                Action.action_type == "FIGHT",
+            )
+        )
+
+    assert final_fight_count == existing_fight_count

@@ -18,15 +18,15 @@ from app.services.serializers import serialize_dispute
 
 SUPPORTED = {"CUSTOMER.DISPUTE.CREATED", "CUSTOMER.DISPUTE.UPDATED", "CUSTOMER.DISPUTE.RESOLVED"}
 
+def _parse_due(value: str | None) -> datetime | None:
+    if not value:
+        return None
 
-def _parse_due(value: str | None) -> datetime:
-    if value:
-        try:
-            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-            return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
-        except ValueError:
-            pass
-    return now_utc() + timedelta(days=10)
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+    except (ValueError, TypeError):
+        return None
 
 
 def _amount(resource: dict[str, Any], fallback: Decimal | None) -> tuple[Decimal, str]:
@@ -55,26 +55,69 @@ async def ingest(db: Session, payload: dict[str, Any]) -> dict[str, Any]:
     dispute = db.scalar(select(Dispute).where(Dispute.paypal_dispute_id == paypal_id))
     if dispute:
         if event_type.endswith("RESOLVED"):
-            dispute.status, dispute.resolved_at = "RESOLVED", now_utc()
+            dispute.paypal_status = (
+                resource.get("status") or "RESOLVED"
+            )
+            dispute.resolved_at = now_utc()
             db.commit()
-            log(db, dispute, "INGEST", "PayPal reported the dispute resolved", input_json={"event_type": event_type, "outcome": resource.get("dispute_outcome")})
-            announce(db, dispute, ["status"])
+
+            log(
+                db,
+                dispute,
+                "INGEST",
+                "PayPal reported the dispute resolved",
+                input_json={
+                    "event_type": event_type,
+                    "status": dispute.paypal_status,
+                    "outcome": resource.get("dispute_outcome"),
+                },
+            )
+            announce(db, dispute, ["status", "paypal_status"])
+
         elif event_type.endswith("UPDATED"):
-            log(db, dispute, "INGEST", "PayPal update received", input_json={"event_type": event_type, "status": resource.get("status")})
-            announce(db, dispute, ["status"])
-        return {"status": "updated", "event_id": event_id, "dispute_id": dispute.id, "run": False}
-    if not event_type.endswith("CREATED"):
-        return {"status": "ignored", "event_id": event_id}
+            dispute.paypal_status = (
+                resource.get("status") or dispute.paypal_status
+            )
+            db.commit()
+
+            log(
+                db,
+                dispute,
+                "INGEST",
+                "PayPal dispute update received",
+                input_json={
+                    "event_type": event_type,
+                    "status": dispute.paypal_status,
+                },
+            )
+            announce(db, dispute, ["paypal_status"])
+
+        return {
+            "status": "updated",
+            "event_id": event_id,
+            "dispute_id": dispute.id,
+            "run": False,
+        }
 
     txn = (resource.get("disputed_transactions") or [{}])[0]
     capture_id = str(txn.get("seller_transaction_id") or "")
-    order = db.scalar(select(Order).where(Order.paypal_capture_id == capture_id)) if capture_id else None
+    is_simulated = bool(payload.get("verdict_simulated"))
+
+    order = (
+        db.scalar(
+            select(Order).where(
+                Order.paypal_capture_id == capture_id,
+                Order.simulated.is_(is_simulated),
+            )
+        )
+        if capture_id else None
+    )    
     amount, currency = _amount(resource, order.amount if order else None)
     if not order:  # no local record for this capture: evidence gathering will report it as missing
-        order = Order(id=f"ORD-{uuid.uuid4().hex[:8].upper()}", merchant_id=get_merchant(db).id, customer_name=(txn.get("buyer") or {}).get("name") or "Unknown customer", amount=amount, currency=currency, items_json=[], ship_address="Unknown", policy_accepted=False, paypal_capture_id=capture_id or "UNKNOWN")
+        order = Order(id=f"ORD-{uuid.uuid4().hex[:8].upper()}", merchant_id=get_merchant(db).id, customer_name=(txn.get("buyer") or {}).get("name") or "Unknown customer", amount=amount, currency=currency, items_json=[], ship_address="Unknown", policy_accepted=False, paypal_capture_id=capture_id or "UNKNOWN",simulated=is_simulated)
         db.add(order)
         db.flush()
-    dispute = Dispute(id=f"DSP-{uuid.uuid4().hex[:6].upper()}", paypal_dispute_id=paypal_id, order_id=order.id, reason=normalize_reason(str(resource.get("reason", ""))), amount=amount, currency=currency, status="NEW", deadline=_parse_due(resource.get("seller_response_due_date")), simulated=bool(payload.get("verdict_simulated")), case=str(payload.get("verdict_case", "R"))[:1])
+    dispute = Dispute(id=f"DSP-{uuid.uuid4().hex[:6].upper()}", paypal_dispute_id=paypal_id, order_id=order.id, reason=normalize_reason(str(resource.get("reason", ""))), amount=amount, currency=currency, status="NEW", deadline=_parse_due(resource.get("seller_response_due_date")), simulated=is_simulated, case=str(payload.get("verdict_case", "R"))[:1])
     db.add(dispute)
     db.commit()
     log(db, dispute, "INGEST", "Webhook verified and dispute created", input_json={"event_id": event_id, "event_type": event_type, "paypal_dispute_id": paypal_id})

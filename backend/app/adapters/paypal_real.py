@@ -66,6 +66,32 @@ class SandboxPayPalAdapter:
             response.raise_for_status()
             return response.json().get("verification_status") == "SUCCESS"
 
+    
+    async def get_capture(self, capture_id: str) -> dict:
+        """Retrieve a capture directly from PayPal Payments v2."""
+        token = await self._access_token()
+
+        async with httpx.AsyncClient(timeout=30) as client:
+            response = await client.get(
+                f"{SANDBOX_URL}/v2/payments/captures/{capture_id}",
+                headers={"Authorization": f"Bearer {token}"},
+            )
+            response.raise_for_status()
+            return response.json()
+
+    async def get_order(self, order_id: str) -> dict:
+        """Retrieve a checkout order directly from PayPal Orders v2."""
+        token = await self._access_token()
+
+        async with httpx.AsyncClient(timeout=30) as client:
+            response = await client.get(
+                f"{SANDBOX_URL}/v2/checkout/orders/{order_id}",
+                headers={"Authorization": f"Bearer {token}"},
+            )
+            response.raise_for_status()
+            return response.json()
+
+
     async def get_dispute(self, dispute_id: str) -> dict:
         token = await self._access_token()
         async with httpx.AsyncClient(timeout=30) as client:

@@ -16,16 +16,58 @@ from app.services.merchant import get_merchant
 from app.services.scenarios import PAYPAL_REASONS, SCENARIOS
 
 
-def seed_store_data(db: Session, case: str, capture_id: str | None = None) -> tuple[Order, str]:
-    """Seed an order, shipment and messages for a scenario. Pass a real PayPal sandbox capture id to link the store data to a real payment."""
+def seed_store_data(db: Session, case: str) -> tuple[Order, str]:
+    """Seed simulator-only order, shipment and message data."""
     s = SCENARIOS[case]
     now = datetime.now(timezone.utc)
     suffix = uuid.uuid4().hex[:8].upper()
-    order = Order(id=f"ORD-{suffix}", merchant_id=get_merchant(db).id, customer_name=s.customer, amount=s.amount, currency="USD", items_json=[{"name": s.item, "qty": 1, "matches_listing": s.matches_listing, "pack_photo": s.pack_photo}], ship_address=s.ship_address, policy_accepted=s.policy_accepted, paypal_capture_id=capture_id or f"SIM-CAP-{suffix}")
+
+    order = Order(
+        id=f"ORD-{suffix}",
+        merchant_id=get_merchant(db).id,
+        customer_name=s.customer,
+        amount=s.amount,
+        currency="USD",
+        items_json=[{
+            "name": s.item,
+            "qty": 1,
+            "matches_listing": s.matches_listing,
+            "pack_photo": s.pack_photo,
+        }],
+        ship_address=s.ship_address,
+        policy_accepted=s.policy_accepted,
+        paypal_capture_id=f"SIM-CAP-{suffix}",
+        simulated=True,
+    )
+
     db.add(order)
     db.flush()
-    db.add(Shipment(order_id=order.id, carrier="SIMULATED CARRIER", tracking=f"SIM-TRK-{suffix}", status="DELIVERED", delivered_at=now - timedelta(days=3), delivery_address=s.delivery_address, proof_url="SIMULATED delivery-photo.jpg" if s.proof else None))
-    db.add_all([Message(order_id=order.id, sender="customer", text=s.customer_message, ts=now - timedelta(days=2)), Message(order_id=order.id, sender="merchant", text=s.merchant_message, ts=now - timedelta(days=2, hours=-1))])
+
+    db.add(Shipment(
+        order_id=order.id,
+        carrier="SIMULATED CARRIER",
+        tracking=f"SIM-TRK-{suffix}",
+        status="DELIVERED",
+        delivered_at=now - timedelta(days=3),
+        delivery_address=s.delivery_address,
+        proof_url="SIMULATED delivery-photo.jpg" if s.proof else None,
+    ))
+
+    db.add_all([
+        Message(
+            order_id=order.id,
+            sender="customer",
+            text=s.customer_message,
+            ts=now - timedelta(days=2),
+        ),
+        Message(
+            order_id=order.id,
+            sender="merchant",
+            text=s.merchant_message,
+            ts=now - timedelta(days=2, hours=-1),
+        ),
+    ])
+
     db.commit()
     return order, f"SIM-PP-{suffix}"
 
